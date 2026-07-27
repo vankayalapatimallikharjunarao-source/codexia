@@ -116,7 +116,7 @@ export default function CohortCommunityHub({
         }
       }
     } catch (err) {
-      console.error("Error polling community data:", err);
+      console.warn("Error polling community data (will retry):", err);
     }
   };
 

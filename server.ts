@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { LEGAL_DOCUMENTS, GRIEVANCE_OFFICER_DETAILS } from "./src/data/legalDocuments";
 
 dotenv.config();
 
@@ -824,7 +825,7 @@ app.post("/api/admin/cohorts", (req, res) => {
   if (!session || session.role !== "admin") {
     return res.status(403).json({ error: "Forbidden: Admin privileges required" });
   }
-  const { year, month, track, start_date, end_date, capacity } = req.body;
+  const { year, month, track, start_date, end_date, capacity, repo_url } = req.body;
   if (!year || !month || !track || !start_date || !end_date) {
     return res.status(400).json({ error: "All cohort creation parameters are required" });
   }
@@ -844,18 +845,19 @@ app.post("/api/admin/cohorts", (req, res) => {
 
   const syllabus_status: Record<string, "upcoming" | "active" | "completed"> = {};
   const syllabusDays = track === "premium" ? pSyllabusDays : bSyllabusDays;
-  syllabusDays.forEach((d, idx) => {
-    syllabus_status[d.id] = idx === 0 ? "active" : "upcoming";
+  syllabusDays.forEach((d) => {
+    syllabus_status[d.id] = "upcoming";
   });
 
   const defaultCapacity = track === "premium" ? 35 : 150;
   const finalCapacity = capacity ? Number(capacity) : defaultCapacity;
+  const finalRepoUrl = repo_url && repo_url.trim() !== "" ? repo_url.trim() : `https://github.com/codexia-academy/${track}-sprint-${monthName.toLowerCase()}-${year}`;
 
   const newCohort: Cohort = {
     id: cohortId,
     name: `${monthName} ${year} ${trackName} Cohort`,
     track,
-    repo_url: `https://github.com/codexia-academy/${track}-sprint-${monthName.toLowerCase()}-${year}`,
+    repo_url: finalRepoUrl,
     documents: [],
     next_session_at: new Date(start_date).toISOString(),
     active_briefing_topic: "TBD_BRIEFING_TOPIC.MKV",
@@ -871,6 +873,63 @@ app.post("/api/admin/cohorts", (req, res) => {
 
   cohorts.set(cohortId, newCohort);
   res.json({ success: true, cohort: newCohort });
+});
+
+// PATCH update cohort specifications (Start date, End date, Repo URL, Capacity)
+app.patch("/api/admin/cohorts/:cohort_id", (req, res) => {
+  const session = getSession(req);
+  if (!session || session.role !== "admin") {
+    return res.status(403).json({ error: "Forbidden: Admin privileges required" });
+  }
+
+  const cohortId = req.params.cohort_id;
+  const cohort = cohorts.get(cohortId);
+  if (!cohort) {
+    return res.status(404).json({ error: "Cohort not found" });
+  }
+
+  const { start_date, end_date, repo_url, capacity } = req.body;
+
+  if (start_date) {
+    cohort.start_date = start_date;
+    try {
+      cohort.next_session_at = new Date(start_date).toISOString();
+    } catch {
+      // Ignore invalid date strings
+    }
+  }
+  if (end_date) {
+    cohort.end_date = end_date;
+  }
+  if (repo_url !== undefined && repo_url.trim() !== "") {
+    cohort.repo_url = repo_url.trim();
+  }
+  if (capacity !== undefined && !isNaN(Number(capacity))) {
+    cohort.capacity = Number(capacity);
+  }
+
+  res.json({ success: true, cohort });
+});
+
+// DELETE a draft cohort (Draft stage only)
+app.delete("/api/admin/cohorts/:cohort_id", (req, res) => {
+  const session = getSession(req);
+  if (!session || session.role !== "admin") {
+    return res.status(403).json({ error: "Forbidden: Admin privileges required" });
+  }
+
+  const cohortId = req.params.cohort_id;
+  const cohort = cohorts.get(cohortId);
+  if (!cohort) {
+    return res.status(404).json({ error: "Cohort not found" });
+  }
+
+  if (cohort.status !== "draft") {
+    return res.status(400).json({ error: "Only cohorts in Draft status can be deleted. Non-draft cohorts must be Archived." });
+  }
+
+  cohorts.delete(cohortId);
+  res.json({ success: true, message: `Cohort ${cohortId} permanently deleted from system ledger.` });
 });
 
 // PATCH status of cohort
@@ -1661,6 +1720,33 @@ app.post("/api/admin/state", (req, res) => {
   res.json(serverStore);
 });
 
+// API Route - Consultation Enquiry Submission & Local Database Recording
+app.post("/api/enquiries", (req, res) => {
+  const { fullName, email, company, teamSize, phone, source, program, message } = req.body || {};
+  
+  if (!fullName || !email || !message) {
+    return res.status(400).json({ error: "Full name, work email, and query message are required." });
+  }
+
+  const newLog = {
+    id: `ENQ-${Math.floor(Math.random() * 9000 + 1000)}`,
+    studentEntity: {
+      initials: (fullName || email || "ENQ").substring(0, 2).toUpperCase(),
+      username: (fullName || email || "consultation_prospect").replace(/\s+/g, "_").toLowerCase()
+    },
+    issueDescription: `CONSULTATION ENQUIRY // Name: ${fullName}, Email: ${email}, Company: ${company || "N/A"}, Team: ${teamSize || "1"}, Phone: ${phone || "N/A"}, Source: ${source || "Website"}, Program: ${program || "Base Cohort"}, Query: "${message}"`,
+    severity: "MEDIUM",
+    timestamp: new Date().toISOString().replace("T", " ").substring(0, 16),
+    status: "UNRESOLVED"
+  };
+
+  serverStore.complaint_logs = [newLog, ...(serverStore.complaint_logs || [])];
+  
+  console.log(`[ENQUIRY SYSTEM] New consultation enquiry recorded for ${fullName} (${email})`);
+
+  res.json({ success: true, log: newLog });
+});
+
 app.get("/api/masterclass", (req, res) => {
   const now = Date.now();
   if (masterclassActive && masterclassExpirationTime && now >= masterclassExpirationTime) {
@@ -1787,6 +1873,48 @@ app.get("/api/razorpay-config", (req, res) => {
     keyId: keyId.trim(),
     hasSecret,
     detectedVars: foundEnvNames
+  });
+});
+
+// API Routes - Legal, Compliance & Policy Documents (PayU & IT Act 2000 / DPDP 2023 Aligned)
+app.get("/api/legal/documents", (req, res) => {
+  res.json({
+    entity: {
+      name: "Vankayalapati Mallikharjuna Rao",
+      operatingName: "Codexia",
+      address: "Mohammed Ilyas Building, Site No. 34, Behind Lady Vailankani School, Varthur, Bengaluru South, Bengaluru, Karnataka, PIN 560087, India",
+      phone: "+91 77605 93646",
+      email: "support.codexiaindia@gmail.com",
+      website: "codexia.academy"
+    },
+    grievanceOfficer: GRIEVANCE_OFFICER_DETAILS,
+    documents: [
+      { id: "terms", title: "Terms and Conditions", badge: "Terms of Service", lastUpdated: "July 2026" },
+      { id: "privacy", title: "Privacy Safeguards & Policy", badge: "DPDP Act 2023 Compliant", lastUpdated: "July 2026" },
+      { id: "refund", title: "Refund and Cancellation Policy", badge: "PayU Aligned", lastUpdated: "July 2026" },
+      { id: "about", title: "About Codexia & Registered Entity Details", badge: "Official Entity Status", lastUpdated: "July 2026" }
+    ]
+  });
+});
+
+app.get(["/api/legal-pages/:pageKey", "/api/legal/documents/:pageKey"], (req, res) => {
+  const rawKey = (req.params.pageKey || "").toLowerCase();
+  let docKey: "terms" | "privacy" | "refund" | "about" = "terms";
+  if (rawKey === "terms" || rawKey === "terms-and-conditions") docKey = "terms";
+  else if (rawKey === "privacy" || rawKey === "privacy-policy") docKey = "privacy";
+  else if (rawKey === "refund" || rawKey === "refund-policy") docKey = "refund";
+  else if (rawKey === "about" || rawKey === "about-us") docKey = "about";
+
+  const doc = LEGAL_DOCUMENTS[docKey];
+  if (!doc) {
+    return res.status(404).json({ error: "Legal page not found" });
+  }
+
+  res.json({
+    ...doc,
+    publisher: "operated by Vankayalapati Mallikharjuna Rao, Bengaluru",
+    lastUpdatedSubtext: "Last updated: 25 July 2026",
+    grievanceOfficer: GRIEVANCE_OFFICER_DETAILS
   });
 });function getSmartFallbackReply(message: string): string {
   const query = message.toLowerCase();

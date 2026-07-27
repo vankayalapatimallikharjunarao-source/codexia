@@ -10,6 +10,7 @@ interface EnrollConfirmationModalProps {
   tier: PricingTier | null;
   currency: "INR" | "USD";
   masterclassActive: boolean;
+  onOpenLegal?: (tab: "terms" | "privacy" | "refund" | "about") => void;
 }
 
 export default function EnrollConfirmationModal({
@@ -19,6 +20,7 @@ export default function EnrollConfirmationModal({
   tier,
   currency,
   masterclassActive,
+  onOpenLegal,
 }: EnrollConfirmationModalProps) {
   if (!isOpen || !tier) return null;
 
@@ -145,6 +147,26 @@ export default function EnrollConfirmationModal({
               You are about to initiate the secure payment gateway for <strong className="text-white font-semibold">{tier.name}</strong>. Please confirm this action to proceed.
             </div>
           </div>
+
+          {/* Legal Terms & Policy Notice */}
+          <p className="text-[10px] text-slate-400 font-sans text-center mb-4 z-10 relative">
+            By proceeding, you agree to Codexia's{" "}
+            <button
+              type="button"
+              onClick={() => onOpenLegal?.("terms")}
+              className="text-cyan underline hover:text-white transition-colors cursor-pointer"
+            >
+              Terms & Conditions
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              onClick={() => onOpenLegal?.("refund")}
+              className="text-cyan underline hover:text-white transition-colors cursor-pointer"
+            >
+              Refund Policy
+            </button>.
+          </p>
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-3 z-10 relative">

@@ -15,7 +15,10 @@ import {
   Clock, 
   Video,
   FileText,
-  Sparkles
+  Sparkles,
+  Edit3,
+  Trash2,
+  Edit
 } from "lucide-react";
 import { Cohort, StudentProfile } from "../../types";
 import { googleSignIn, createMeetSpace, getAccessToken } from "../../lib/googleMeet";
@@ -90,13 +93,108 @@ export default function AdminCurriculumCalendar({
   const [newCohortTrack, setNewCohortTrack] = useState<"base" | "premium">("base");
   const [newCohortStartDate, setNewCohortStartDate] = useState("");
   const [newCohortEndDate, setNewCohortEndDate] = useState("");
+  const [newCohortRepoUrl, setNewCohortRepoUrl] = useState("");
   const [newCohortCapacity, setNewCohortCapacity] = useState("150");
   const [isSavingCohort, setIsSavingCohort] = useState(false);
+
+  // Edit Cohort Form state
+  const [editingCohort, setEditingCohort] = useState<Cohort | null>(null);
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editRepoUrl, setEditRepoUrl] = useState("");
+  const [editCapacity, setEditCapacity] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [deletingCohortId, setDeletingCohortId] = useState<string | null>(null);
 
   // Sync capacity with track type defaults
   useEffect(() => {
     setNewCohortCapacity(newCohortTrack === "premium" ? "35" : "150");
   }, [newCohortTrack]);
+
+  const openEditCohort = (cohort: Cohort) => {
+    setEditingCohort(cohort);
+    setEditStartDate(cohort.start_date || "");
+    setEditEndDate(cohort.end_date || "");
+    setEditRepoUrl(cohort.repo_url || "");
+    setEditCapacity(String(cohort.capacity || (cohort.track === "premium" ? 35 : 150)));
+  };
+
+  const handleSaveCohortEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCohort) return;
+    if (!editStartDate || !editEndDate) {
+      showNotification("ERROR // Start and End dates are both required");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`/api/admin/cohorts/${editingCohort.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          start_date: editStartDate,
+          end_date: editEndDate,
+          repo_url: editRepoUrl,
+          capacity: Number(editCapacity)
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const updated = data.cohort;
+        setCohortsList(prev => prev.map(c => c.id === updated.id ? updated : c));
+        if (activeCohortDetails?.id === updated.id) {
+          setActiveCohortDetails(updated);
+        }
+        setEditingCohort(null);
+        showNotification(`SUCCESS // Cohort ${updated.id} specifications updated successfully!`);
+      } else {
+        const err = await res.json();
+        showNotification(`ERROR // Update failed: ${err.error || "Unknown"}`);
+      }
+    } catch (err: any) {
+      showNotification(`ERROR // Connection error: ${err.message || err}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteCohort = async (cohort: Cohort) => {
+    if (cohort.status !== "draft") {
+      showNotification("ERROR // Only Draft cohorts can be deleted. Enrolling/Active cohorts must be Archived.");
+      return;
+    }
+
+    if (!window.confirm(`PERMANENT DELETION // Are you sure you want to delete draft cohort [${cohort.id}]? This cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingCohortId(cohort.id);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`/api/admin/cohorts/${cohort.id}`, {
+        method: "DELETE",
+        headers
+      });
+
+      if (res.ok) {
+        setCohortsList(prev => prev.filter(c => c.id !== cohort.id));
+        if (activeCohortDetails?.id === cohort.id) {
+          setActiveCohortDetails(null);
+        }
+        showNotification(`SUCCESS // Draft Cohort ${cohort.id} permanently purged with no trace.`);
+      } else {
+        const err = await res.json();
+        showNotification(`ERROR // Deletion failed: ${err.error || "Unknown"}`);
+      }
+    } catch (err: any) {
+      showNotification(`ERROR // Connection error: ${err.message || err}`);
+    } finally {
+      setDeletingCohortId(null);
+    }
+  };
 
   // Status Change conflict resolution state
   const [conflictCohort, setConflictCohort] = useState<Cohort | null>(null);
@@ -193,7 +291,8 @@ export default function AdminCurriculumCalendar({
           track: newCohortTrack,
           start_date: newCohortStartDate,
           end_date: newCohortEndDate,
-          capacity: Number(newCohortCapacity) || (newCohortTrack === "premium" ? 35 : 150)
+          capacity: Number(newCohortCapacity) || (newCohortTrack === "premium" ? 35 : 150),
+          repo_url: newCohortRepoUrl
         })
       });
 
@@ -203,7 +302,8 @@ export default function AdminCurriculumCalendar({
         setIsCreatingCohort(false);
         setNewCohortStartDate("");
         setNewCohortEndDate("");
-        showNotification(`SUCCESS // Cohort ${data.cohort.id} successfully compiled!`);
+        setNewCohortRepoUrl("");
+        showNotification(`SUCCESS // Cohort ${data.cohort.id} compiled & student portal auto-provisioned!`);
       } else {
         const err = await res.json();
         showNotification(`ERROR // Compile failed: ${err.error || "Unknown"}`);
@@ -268,7 +368,7 @@ export default function AdminCurriculumCalendar({
               }
             }
           } catch (meetErr: any) {
-            console.error("Auto-meet generation failed:", meetErr);
+            console.warn("Auto-meet generation note:", meetErr.message || meetErr);
             showNotification(`MEET INFO // Cohort set to Active. To connect a live Google Meet, use the manual generate action in the detail pane.`);
           }
         }
@@ -602,6 +702,17 @@ export default function AdminCurriculumCalendar({
                       className="w-full bg-[#16171D] border border-[#2a2c35] focus:border-cyan text-white p-2 rounded outline-none"
                     />
                   </div>
+
+                  <div className="sm:col-span-4 space-y-1.5 font-mono">
+                    <label className="text-slate-400 uppercase tracking-wider block">GITHUB REPO URL (OPTIONAL)</label>
+                    <input
+                      type="url"
+                      value={newCohortRepoUrl}
+                      onChange={(e) => setNewCohortRepoUrl(e.target.value)}
+                      placeholder="https://github.com/codexia-academy/..."
+                      className="w-full bg-[#16171D] border border-[#2a2c35] focus:border-cyan text-white p-2 rounded outline-none text-[8.5px]"
+                    />
+                  </div>
                 </div>
 
                 <button
@@ -658,6 +769,7 @@ export default function AdminCurriculumCalendar({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {monthlyCohorts.map(cohort => {
                   const isWorkspaceOpen = activeCohortDetails?.id === cohort.id;
+                  const isEditingThisCohort = editingCohort?.id === cohort.id;
                   
                   return (
                     <div
@@ -665,74 +777,206 @@ export default function AdminCurriculumCalendar({
                       className={`p-4 border rounded-xl flex flex-col justify-between gap-4 transition-all ${
                         isWorkspaceOpen 
                           ? "bg-[#142929]/10 border-cyan/40" 
+                          : isEditingThisCohort
+                          ? "bg-black/80 border-cyan/50"
                           : "bg-black/40 border-[#2a2c35] hover:border-slate-800"
                       }`}
                     >
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="bg-black/60 border border-slate-700 font-mono font-bold text-white px-2 py-0.5 rounded text-[8.5px] tracking-wider block truncate max-w-[150px]">
-                              {cohort.id}
+                      {isEditingThisCohort ? (
+                        <form onSubmit={handleSaveCohortEdit} className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-[#2a2c35] pb-2">
+                            <span className="text-[9px] text-cyan font-bold uppercase tracking-wider flex items-center gap-1">
+                              <Edit3 className="w-3.5 h-3.5" />
+                              EDIT SPECIFICATIONS [{cohort.id}]
                             </span>
-                            <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider block mt-1.5">
-                              {cohort.track === "premium" ? "👑 Premium Alpha" : "💻 Base Cohort"}
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCohort(null)}
+                              className="text-[8px] text-slate-500 hover:text-white uppercase font-bold"
+                            >
+                              Cancel
+                            </button>
                           </div>
 
-                          <span className={`text-[7px] font-bold px-2 py-0.5 rounded border uppercase tracking-widest ${
-                            cohort.status === "draft" ? "bg-slate-950 text-slate-400 border-slate-800" :
-                            cohort.status === "enrolling" ? "bg-cyan/10 text-cyan border-cyan/30 animate-pulse" :
-                            cohort.status === "active" ? "bg-green-950 text-green-400 border-green-800" :
-                            cohort.status === "completed" ? "bg-purple-950 text-purple-400 border-purple-800" :
-                            "bg-[#221c16] text-[#ff9900] border-[#995c00]"
-                          }`}>
-                            {cohort.status}
-                          </span>
-                        </div>
+                          <div className="bg-[#16171D] p-2 border border-[#2a2c35] rounded text-[8px] font-mono text-slate-400 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span>TRACK: <strong className="text-white">{cohort.track === "premium" ? "Premium Alpha" : "Base"}</strong></span>
+                              <span className="text-slate-500 flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> LOCKED</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>TIMEFRAME: <strong className="text-white">{MONTHS.find(m => m.value === cohort.month)?.name} {cohort.year}</strong></span>
+                              <span className="text-slate-500 flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> LOCKED</span>
+                            </div>
+                          </div>
 
-                        <div className="space-y-1 font-mono text-[8.5px] text-[#A0A2B0] uppercase border-t border-[#2a2c35]/40 pt-2.5">
-                          <div>Start: <strong className="text-slate-300">{cohort.start_date}</strong></div>
-                          <div>End: <strong className="text-slate-300">{cohort.end_date}</strong></div>
-                          {cohort.repo_url && (
-                            <div className="truncate text-[7.5px] tracking-tight">Repo: <strong className="text-cyan underline select-all">{cohort.repo_url}</strong></div>
-                          )}
-                        </div>
-                      </div>
+                          <div className="grid grid-cols-2 gap-2 text-[8.5px]">
+                            <div className="space-y-1 font-mono">
+                              <label className="text-slate-400 uppercase tracking-wider block">START DATE</label>
+                              <input
+                                type="date"
+                                required
+                                value={editStartDate}
+                                onChange={(e) => setEditStartDate(e.target.value)}
+                                className="w-full bg-[#16171D] border border-[#2a2c35] focus:border-cyan text-white p-1.5 rounded outline-none uppercase"
+                              />
+                            </div>
 
-                      <div className="pt-2.5 border-t border-[#2a2c35]/40 space-y-2">
-                        <div className="space-y-1">
-                          <span className="text-[7.5px] text-slate-500 uppercase font-bold block mb-1">
-                            TRANSITION STATUS LEDGER:
-                          </span>
-                          <div className="flex flex-wrap gap-1">
-                            {["draft", "enrolling", "active", "completed", "archived"].map(st => {
-                              const isCurrent = cohort.status === st;
-                              return (
+                            <div className="space-y-1 font-mono">
+                              <label className="text-slate-400 uppercase tracking-wider block">END DATE</label>
+                              <input
+                                type="date"
+                                required
+                                value={editEndDate}
+                                onChange={(e) => setEditEndDate(e.target.value)}
+                                className="w-full bg-[#16171D] border border-[#2a2c35] focus:border-cyan text-white p-1.5 rounded outline-none uppercase"
+                              />
+                            </div>
+
+                            <div className="col-span-2 space-y-1 font-mono">
+                              <label className="text-slate-400 uppercase tracking-wider block">GITHUB REPO URL</label>
+                              <input
+                                type="url"
+                                required
+                                value={editRepoUrl}
+                                onChange={(e) => setEditRepoUrl(e.target.value)}
+                                placeholder="https://github.com/..."
+                                className="w-full bg-[#16171D] border border-[#2a2c35] focus:border-cyan text-white p-1.5 rounded outline-none text-[8px]"
+                              />
+                            </div>
+
+                            <div className="col-span-2 space-y-1 font-mono">
+                              <label className="text-slate-400 uppercase tracking-wider block">SEAT CAPACITY</label>
+                              <input
+                                type="number"
+                                required
+                                min="1"
+                                max="1000"
+                                value={editCapacity}
+                                onChange={(e) => setEditCapacity(e.target.value)}
+                                className="w-full bg-[#16171D] border border-[#2a2c35] focus:border-cyan text-white p-1.5 rounded outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              type="submit"
+                              disabled={isSavingEdit}
+                              className="flex-1 py-1.5 bg-cyan hover:bg-cyan/90 text-black font-extrabold uppercase text-[8.5px] tracking-wider rounded transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              {isSavingEdit ? "SAVING..." : "SAVE CHANGES"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCohort(null)}
+                              className="px-3 py-1.5 bg-[#16171D] hover:bg-slate-800 text-slate-300 font-bold uppercase text-[8.5px] rounded transition-all cursor-pointer"
+                            >
+                              CANCEL
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <span className="bg-black/60 border border-slate-700 font-mono font-bold text-white px-2 py-0.5 rounded text-[8.5px] tracking-wider block truncate max-w-[150px]">
+                                  {cohort.id}
+                                </span>
+                                <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider block mt-1.5">
+                                  {cohort.track === "premium" ? "👑 Premium Alpha" : "💻 Base Cohort"}
+                                </span>
+                              </div>
+
+                              <span className={`text-[7px] font-bold px-2 py-0.5 rounded border uppercase tracking-widest ${
+                                cohort.status === "draft" ? "bg-slate-950 text-slate-400 border-slate-800" :
+                                cohort.status === "enrolling" ? "bg-cyan/10 text-cyan border-cyan/30 animate-pulse" :
+                                cohort.status === "active" ? "bg-green-950 text-green-400 border-green-800" :
+                                cohort.status === "completed" ? "bg-purple-950 text-purple-400 border-purple-800" :
+                                "bg-[#221c16] text-[#ff9900] border-[#995c00]"
+                              }`}>
+                                {cohort.status}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1 font-mono text-[8.5px] text-[#A0A2B0] uppercase border-t border-[#2a2c35]/40 pt-2.5">
+                              <div>Start: <strong className="text-slate-300">{cohort.start_date}</strong></div>
+                              <div>End: <strong className="text-slate-300">{cohort.end_date}</strong></div>
+                              <div>Capacity: <strong className="text-slate-300">{cohort.capacity || (cohort.track === "premium" ? 35 : 150)} seats</strong></div>
+                              {cohort.repo_url && (
+                                <div className="truncate text-[7.5px] tracking-tight">Repo: <strong className="text-cyan underline select-all">{cohort.repo_url}</strong></div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="pt-2.5 border-t border-[#2a2c35]/40 space-y-2">
+                            <div className="space-y-1">
+                              <span className="text-[7.5px] text-slate-500 uppercase font-bold block mb-1">
+                                TRANSITION STATUS LEDGER:
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {["draft", "enrolling", "active", "completed", "archived"].map(st => {
+                                  const isCurrent = cohort.status === st;
+                                  return (
+                                    <button
+                                      key={st}
+                                      onClick={() => updateCohortStatus(cohort.id, st)}
+                                      disabled={isCurrent}
+                                      className={`px-1.5 py-0.5 rounded text-[7px] font-mono uppercase tracking-wider transition-all cursor-pointer ${
+                                        isCurrent
+                                          ? "bg-[#16171D] text-white border border-slate-700 cursor-default"
+                                          : "bg-black hover:bg-slate-900 border border-[#2a2c35] text-[#A0A2B0] hover:text-white"
+                                      }`}
+                                    >
+                                      {st}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 pt-1">
+                              <button
+                                onClick={() => fetchCohortWorkspaceDetails(cohort)}
+                                className="flex-1 py-1.5 bg-[#16171D]/60 hover:bg-slate-800 border border-[#2a2c35] text-white hover:text-cyan hover:border-cyan/40 font-bold uppercase text-[8px] rounded transition-all cursor-pointer flex items-center justify-center gap-1"
+                              >
+                                <Users className="w-3.5 h-3.5" />
+                                {isWorkspaceOpen ? "REFRESH" : "OPEN WORKSPACE"}
+                              </button>
+
+                              <button
+                                onClick={() => openEditCohort(cohort)}
+                                title="Edit Cohort Specifications"
+                                className="px-2.5 py-1.5 bg-[#16171D] hover:bg-cyan/20 border border-[#2a2c35] hover:border-cyan/50 text-slate-300 hover:text-cyan font-bold uppercase text-[8px] rounded transition-all cursor-pointer flex items-center justify-center gap-1"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-cyan" />
+                                EDIT
+                              </button>
+
+                              {cohort.status === "draft" ? (
                                 <button
-                                  key={st}
-                                  onClick={() => updateCohortStatus(cohort.id, st)}
-                                  disabled={isCurrent}
-                                  className={`px-1.5 py-0.5 rounded text-[7px] font-mono uppercase tracking-wider transition-all cursor-pointer ${
-                                    isCurrent
-                                      ? "bg-[#16171D] text-white border border-slate-700 cursor-default"
-                                      : "bg-black hover:bg-slate-900 border border-[#2a2c35] text-[#A0A2B0] hover:text-white"
-                                  }`}
+                                  onClick={() => handleDeleteCohort(cohort)}
+                                  disabled={deletingCohortId === cohort.id}
+                                  title="Delete Draft Cohort"
+                                  className="px-2 py-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-500/40 hover:border-red-500 text-red-400 font-bold uppercase text-[8px] rounded transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50"
                                 >
-                                  {st}
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {deletingCohortId === cohort.id ? "PURGING..." : "DELETE"}
                                 </button>
-                              );
-                            })}
+                              ) : (
+                                <button
+                                  disabled
+                                  title="Only Draft cohorts can be deleted. Enrolling/Active cohorts must be Archived."
+                                  className="px-2 py-1.5 bg-slate-900/40 border border-slate-800/40 text-slate-600 font-bold uppercase text-[8px] rounded cursor-not-allowed flex items-center justify-center gap-1 opacity-40"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  DELETE
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-
-                        <button
-                          onClick={() => fetchCohortWorkspaceDetails(cohort)}
-                          className="w-full mt-1.5 py-1.5 bg-[#16171D]/60 hover:bg-slate-800 border border-[#2a2c35] text-white hover:text-cyan hover:border-cyan/40 font-bold uppercase text-[8px] rounded transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                        >
-                          <Users className="w-3.5 h-3.5" />
-                          {isWorkspaceOpen ? "REFRESH WORKSPACE" : "OPEN COHORT WORKSPACE"}
-                        </button>
-                      </div>
+                        </>
+                      )}
                     </div>
                   );
                 })}

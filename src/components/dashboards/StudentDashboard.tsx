@@ -230,7 +230,7 @@ export default function StudentDashboard({
           }
         }
       } catch (err) {
-        console.error("Error fetching cohort data:", err);
+        console.warn("Error fetching cohort data (will retry):", err);
       }
     };
     fetchCohortData();
@@ -410,7 +410,11 @@ export default function StudentDashboard({
         }
       }
     } catch (err: any) {
-      console.error(err);
+      if (err.message?.includes("Sign-In Blocked/Closed") || err.message?.includes("popup-closed") || err.message?.includes("popup-blocked")) {
+        console.warn(err.message || err);
+      } else {
+        console.error(err);
+      }
       showNotification(`ERROR // Failed to generate Google Meet: ${err.message || err}`);
     } finally {
       setIsGeneratingMeet(false);

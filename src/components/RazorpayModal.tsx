@@ -22,9 +22,10 @@ interface RazorpayModalProps {
   onClose: () => void;
   tier: PricingTier | null;
   onPaymentSuccess: (tier: PricingTier, isUSD: boolean) => void;
+  onOpenLegal?: (tab: "terms" | "privacy" | "refund" | "about") => void;
 }
 
-export default function RazorpayModal({ isOpen, onClose, tier, onPaymentSuccess }: RazorpayModalProps) {
+export default function RazorpayModal({ isOpen, onClose, tier, onPaymentSuccess, onOpenLegal }: RazorpayModalProps) {
   const [method, setMethod] = useState<"none" | "card" | "upi" | "netbanking">("none");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -528,6 +529,34 @@ export default function RazorpayModal({ isOpen, onClose, tier, onPaymentSuccess 
                   </button>
                 </form>
               )}
+
+              {/* Legal & Policy Quick Link Footer */}
+              <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                <span>Processed via PayU Gateway</span>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onOpenLegal?.("privacy")}
+                    className="hover:text-cyan underline cursor-pointer"
+                  >
+                    Privacy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLegal?.("terms")}
+                    className="hover:text-cyan underline cursor-pointer"
+                  >
+                    Terms
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLegal?.("refund")}
+                    className="hover:text-cyan underline cursor-pointer"
+                  >
+                    Refunds
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

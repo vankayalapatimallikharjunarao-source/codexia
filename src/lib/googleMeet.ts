@@ -54,7 +54,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
-    console.error("Google Sign-In Error:", error);
     if (
       error.code === "auth/popup-closed-by-user" || 
       error.code === "auth/popup-blocked" || 
@@ -62,10 +61,12 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       error.message?.includes("popup-closed-by-user") ||
       error.message?.includes("popup-blocked")
     ) {
+      console.warn("Google Sign-In popup closed or blocked by user/iframe:", error.message || error);
       throw new Error(
         "Sign-In Blocked/Closed: Since the app is running in an iframe preview, please click 'Open in new tab' (top-right icon of the preview pane) to bypass browser iframe restrictions, or check your browser's popup blocker settings."
       );
     }
+    console.error("Google Sign-In Error:", error);
     throw error;
   } finally {
     isSigningIn = false;

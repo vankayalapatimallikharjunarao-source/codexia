@@ -240,7 +240,11 @@ export default function AdminDashboard({
         }
       }
     } catch (err: any) {
-      console.error(err);
+      if (err.message?.includes("Sign-In Blocked/Closed") || err.message?.includes("popup-closed") || err.message?.includes("popup-blocked")) {
+        console.warn(err.message || err);
+      } else {
+        console.error(err);
+      }
       showNotification(`ERROR // Failed to generate Google Meet: ${err.message || err}`);
     } finally {
       setIsGeneratingMeet(false);
@@ -348,7 +352,7 @@ export default function AdminDashboard({
           setCohortsList(cohortsData);
         }
       } catch (e) {
-        console.error("Error fetching state from server:", e);
+        console.warn("Error fetching state from server (will retry):", e);
       }
     };
     fetchState();

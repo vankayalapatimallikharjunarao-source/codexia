@@ -59,6 +59,8 @@ import CircularAgent from "./components/CircularAgent";
 import RazorpayModal from "./components/RazorpayModal";
 import GoogleOAuthModal from "./components/GoogleOAuthModal";
 import EnrollConfirmationModal from "./components/EnrollConfirmationModal";
+import LegalPolicyModal from "./components/LegalPolicyModal";
+import LegalPageView from "./components/LegalPageView";
 import FeedbackSection from "./components/FeedbackSection";
 import PremiumToolList from "./components/PremiumToolList";
 import PremiumToolIcon from "./components/PremiumToolIcon";
@@ -146,6 +148,48 @@ const faqSchema = {
 export default function App() {
   // Navigation Tabs: "curriculum" | "student" | "services" | "frameworks" | "case-studies" | "pricing" | "admin"
   const [currentTab, setCurrentTab] = useState<"curriculum" | "student" | "services" | "frameworks" | "case-studies" | "pricing" | "admin">("curriculum");
+
+  // DEDICATED URL-BASED LEGAL PAGE ROUTING
+  const [legalRoute, setLegalRoute] = useState<"about" | "terms" | "privacy" | "refund" | "refund-policy" | null>(() => {
+    if (typeof window === "undefined") return null;
+    const path = window.location.pathname.toLowerCase().replace(/\/$/, "");
+    if (path === "/about" || path === "/about-us") return "about";
+    if (path === "/terms" || path === "/terms-and-conditions") return "terms";
+    if (path === "/privacy" || path === "/privacy-policy") return "privacy";
+    if (path === "/refund" || path === "/refund-policy") return "refund-policy";
+    return null;
+  });
+
+  const navigateToPage = (path: string) => {
+    window.history.pushState(null, "", path);
+    const cleanPath = path.toLowerCase().replace(/\/$/, "");
+    if (cleanPath === "/about" || cleanPath === "/about-us") {
+      setLegalRoute("about");
+    } else if (cleanPath === "/terms" || cleanPath === "/terms-and-conditions") {
+      setLegalRoute("terms");
+    } else if (cleanPath === "/privacy" || cleanPath === "/privacy-policy") {
+      setLegalRoute("privacy");
+    } else if (cleanPath === "/refund" || cleanPath === "/refund-policy") {
+      setLegalRoute("refund-policy");
+    } else {
+      setLegalRoute(null);
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname.toLowerCase().replace(/\/$/, "");
+      if (path === "/about" || path === "/about-us") setLegalRoute("about");
+      else if (path === "/terms" || path === "/terms-and-conditions") setLegalRoute("terms");
+      else if (path === "/privacy" || path === "/privacy-policy") setLegalRoute("privacy");
+      else if (path === "/refund" || path === "/refund-policy") setLegalRoute("refund-policy");
+      else setLegalRoute(null);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
   const [openFaqIds, setOpenFaqIds] = useState<string[]>([]);
   const [developerMode, setDeveloperMode] = useState(false);
   const [isSignInModalOpen, setIsSignInModalOpen] = useState(false);
@@ -153,7 +197,16 @@ export default function App() {
   const [userEmail, setUserEmail] = useState("");
   const [signedInUser, setSignedInUser] = useState<string | null>(null);
 
-  // ENQUIRY FORM STATES
+  // LEGAL & COMPLIANCE MODAL STATES
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [legalModalTab, setLegalModalTab] = useState<"terms" | "privacy" | "refund" | "about">("terms");
+
+  const handleOpenLegalModal = (tab: "terms" | "privacy" | "refund" | "about" = "terms") => {
+    setLegalModalTab(tab);
+    setIsLegalModalOpen(true);
+  };
+
+  // ENQUIRY FORM STATES & SUBMISSION HANDLER
   const [enquiryForm, setEnquiryForm] = useState({
     fullName: "",
     workEmail: "",
@@ -163,11 +216,18 @@ export default function App() {
     phoneNumber: "",
     countryCode: "+91",
     source: "",
-    query: ""
+    query: "",
+    botcheck: false
   });
+  const [enquirySubmitting, setEnquirySubmitting] = useState(false);
+  const [enquirySubmittedSuccess, setEnquirySubmittedSuccess] = useState(false);
+  const [enquiryError, setEnquiryError] = useState<string | null>(null);
 
-  const handleEnquirySubmit = (e: React.FormEvent) => {
+  const handleEnquirySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setEnquiryError(null);
+    setEnquirySubmittedSuccess(false);
+
     if (
       !enquiryForm.fullName.trim() || 
       !enquiryForm.workEmail.trim() || 
@@ -176,26 +236,123 @@ export default function App() {
       !enquiryForm.query.trim()
     ) {
       showNotification("ERROR // REQUIRED FIELDS CANNOT BE EMPTY");
+      setEnquiryError("Please fill in all required fields.");
       return;
     }
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(enquiryForm.workEmail)) {
       showNotification("ERROR // INVALID WORK EMAIL ADDRESS");
+      setEnquiryError("Please enter a valid work email address.");
       return;
     }
-    
-    showNotification("SUCCESS // ENQUIRY SUBMITTED FOR PROTOCOL ALIGNMENT");
-    setEnquiryForm({
-      fullName: "",
-      workEmail: "",
-      companyName: "",
-      teamSize: "1",
-      program: "Base Cohort",
-      phoneNumber: "",
-      countryCode: "+91",
-      source: "",
-      query: ""
-    });
+
+    setEnquirySubmitting(true);
+
+    const fullPhone = `${enquiryForm.countryCode} ${enquiryForm.phoneNumber}`.trim();
+
+    // Field names mapped strictly as specified:
+    // Full Name -> fullName
+    // Work Email -> email
+    // Company Name -> company
+    // Team Size -> teamSize
+    // Phone Number -> phone
+    // Where did you hear about us -> source
+    // Program Interested In -> program
+    // Query -> message
+    const web3Payload = {
+      access_key: "be8b6e4d-b6cc-40f5-a82d-d63ceea433f7",
+      subject: "New Consultation Enquiry - Codexia Website",
+      fullName: enquiryForm.fullName,
+      email: enquiryForm.workEmail,
+      company: enquiryForm.companyName,
+      teamSize: enquiryForm.teamSize,
+      phone: fullPhone,
+      source: enquiryForm.source,
+      program: enquiryForm.program,
+      message: enquiryForm.query,
+      botcheck: enquiryForm.botcheck
+    };
+
+    const localPayload = {
+      fullName: enquiryForm.fullName,
+      email: enquiryForm.workEmail,
+      company: enquiryForm.companyName,
+      teamSize: enquiryForm.teamSize,
+      phone: fullPhone,
+      source: enquiryForm.source,
+      program: enquiryForm.program,
+      message: enquiryForm.query
+    };
+
+    // Target 1: Web3Forms submission via fetch AJAX POST
+    const submitToWeb3Forms = async () => {
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(web3Payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return true;
+      }
+      throw new Error(data.message || "Web3Forms submission failed");
+    };
+
+    // Target 2: Local save to backend database
+    const saveLocally = async () => {
+      const res = await fetch("/api/enquiries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(localPayload)
+      });
+      if (res.ok) {
+        return true;
+      }
+      throw new Error("Local enquiry save failed");
+    };
+
+    // Dual-write: attempt both targets concurrently
+    const results = await Promise.allSettled([submitToWeb3Forms(), saveLocally()]);
+
+    const web3Success = results[0].status === "fulfilled";
+    const localSuccess = results[1].status === "fulfilled";
+
+    setEnquirySubmitting(false);
+
+    if (web3Success || localSuccess) {
+      setEnquirySubmittedSuccess(true);
+      showNotification("Thanks — we've received your enquiry and will follow up within 2 business days");
+      
+      // Also log locally in client state for immediate admin dashboard reflection
+      handleNewLog(
+        `CONSULTATION ENQUIRY // ${enquiryForm.fullName} (${enquiryForm.workEmail}, ${enquiryForm.companyName || "N/A"}) - Program: ${enquiryForm.program}`,
+        "LOW"
+      );
+
+      // Reset form fields on success
+      setEnquiryForm({
+        fullName: "",
+        workEmail: "",
+        companyName: "",
+        teamSize: "1",
+        program: "Base Cohort",
+        phoneNumber: "",
+        countryCode: "+91",
+        source: "",
+        query: "",
+        botcheck: false
+      });
+    } else {
+      // Both failed: show retry-able error without clearing input
+      setEnquiryError("Unable to submit enquiry right now. Please check your connection and try again.");
+      showNotification("ERROR // SUBMISSION FAILED. PLEASE RETRY.");
+    }
   };
   
   // SECURE SESSION & RBAC SYSTEM STATES
@@ -218,6 +375,9 @@ export default function App() {
 
   const navigateToTab = (tab: "curriculum" | "student" | "services" | "frameworks" | "case-studies" | "pricing" | "admin") => {
     setCurrentTab(tab);
+    if (legalRoute) {
+      setLegalRoute(null);
+    }
     if (tab === "admin") {
       window.history.pushState(null, "", "/admin");
     } else {
@@ -301,7 +461,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error("Error syncing masterclass status with server", err);
+        console.warn("Syncing masterclass status with server temporary delay (will retry):", err);
       }
     };
 
@@ -697,7 +857,7 @@ export default function App() {
           console.warn("Forbidden status in state fetching.");
         }
       } catch (err) {
-        console.error("Error fetching central server state:", err);
+        console.warn("Fetching central server state temporary delay (will retry):", err);
       }
     };
     fetchServerState();
@@ -1021,7 +1181,7 @@ export default function App() {
       <nav className="fixed top-0 w-full z-40 h-16 bg-[#0D0E12]/95 border-b border-[#2A2C35] flex justify-between items-center px-4 md:px-12">
         <div className="flex items-center gap-6">
           {/* Codexia Animated Logo */}
-          <div className="flex items-center cursor-pointer" onClick={() => setCurrentTab("curriculum")}>
+          <div className="flex items-center cursor-pointer" onClick={() => { navigateToTab("curriculum"); navigateToPage("/"); }}>
             <CodexiaLogo size="sm" showText={true} className="!flex-row !gap-1.5" />
           </div>
 
@@ -1149,6 +1309,11 @@ export default function App() {
       </nav>
 
       {/* Main Container */}
+      {legalRoute ? (
+        <main className="pt-16 min-h-screen">
+          <LegalPageView pageKey={legalRoute} onNavigateHome={() => navigateToPage("/")} />
+        </main>
+      ) : (
       <main className="pt-16 min-h-screen">
         {/* Horizontal scroll navigation bar for viewports smaller than xl */}
         <div className="xl:hidden sticky top-16 z-30 bg-[#0D0E12]/95 border-b border-[#2A2C35] overflow-x-auto flex items-center gap-2 px-4 py-2.5 scrollbar-thin scrollbar-thumb-cyan/10 scrollbar-track-transparent">
@@ -3252,144 +3417,210 @@ export default function App() {
                     <h3 className="font-sans text-lg font-bold text-white">Let&apos;s Build Your System</h3>
                   </div>
 
-                  <form onSubmit={handleEnquirySubmit} className="space-y-4 relative z-10">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Full Name */}
-                      <div className="space-y-1">
-                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Full Name *</label>
-                        <input 
-                          type="text" 
-                          required
-                          value={enquiryForm.fullName}
-                          onChange={(e) => setEnquiryForm({...enquiryForm, fullName: e.target.value})}
-                          placeholder="Jane Doe"
-                          className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
-                        />
+                  {enquirySubmittedSuccess ? (
+                    <div className="p-8 bg-[#0D0E12]/90 border border-cyan/40 rounded-xl text-center space-y-4 my-4 relative z-10">
+                      <div className="w-12 h-12 bg-cyan/10 border border-cyan/40 rounded-full flex items-center justify-center text-cyan mx-auto">
+                        <Check className="w-6 h-6 text-cyan" />
                       </div>
-
-                      {/* Work Email */}
-                      <div className="space-y-1">
-                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Work Email *</label>
-                        <input 
-                          type="email" 
-                          required
-                          value={enquiryForm.workEmail}
-                          onChange={(e) => setEnquiryForm({...enquiryForm, workEmail: e.target.value})}
-                          placeholder="jane@company.com"
-                          className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
-                        />
-                      </div>
+                      <h4 className="font-mono text-sm font-bold uppercase tracking-wider text-cyan">Enquiry Received</h4>
+                      <p className="text-slate-200 font-sans text-xs max-w-md mx-auto leading-relaxed">
+                        Thanks — we&apos;ve received your enquiry and will follow up within 2 business days
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setEnquirySubmittedSuccess(false)}
+                        className="mt-4 px-4 py-2 border border-cyan/30 text-cyan hover:bg-cyan/10 rounded font-mono text-[10px] uppercase tracking-widest cursor-pointer transition-all"
+                      >
+                        Submit Another Enquiry
+                      </button>
                     </div>
+                  ) : (
+                    <form 
+                      action="https://api.web3forms.com/submit" 
+                      method="POST" 
+                      onSubmit={handleEnquirySubmit} 
+                      className="space-y-4 relative z-10"
+                    >
+                      {/* Hidden fields for Web3Forms target */}
+                      <input type="hidden" name="access_key" value="be8b6e4d-b6cc-40f5-a82d-d63ceea433f7" />
+                      <input type="hidden" name="subject" value="New Consultation Enquiry - Codexia Website" />
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Company Name */}
-                      <div className="space-y-1">
-                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Company Name</label>
-                        <input 
-                          type="text" 
-                          value={enquiryForm.companyName}
-                          onChange={(e) => setEnquiryForm({...enquiryForm, companyName: e.target.value})}
-                          placeholder="Acme Corp"
-                          className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
-                        />
-                      </div>
+                      {/* Visually hidden Web3Forms Honeypot field */}
+                      <input 
+                        type="checkbox" 
+                        name="botcheck" 
+                        className="hidden" 
+                        style={{ display: "none" }} 
+                        tabIndex={-1}
+                        autoComplete="off"
+                        checked={enquiryForm.botcheck}
+                        onChange={(e) => setEnquiryForm({ ...enquiryForm, botcheck: e.target.checked })}
+                      />
 
-                      {/* Team Size */}
-                      <div className="space-y-1">
-                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Team Size</label>
-                        <select 
-                          value={enquiryForm.teamSize}
-                          onChange={(e) => setEnquiryForm({...enquiryForm, teamSize: e.target.value})}
-                          className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50"
-                        >
-                          <option value="1">1 person</option>
-                          <option value="2-15">2 - 15 people</option>
-                          <option value="15+">15+ people</option>
-                        </select>
-                      </div>
-                    </div>
+                      {/* In-App Error Notification */}
+                      {enquiryError && (
+                        <div className="p-4 bg-red-500/10 border border-red-500/40 rounded-lg text-red-400 text-xs font-mono flex items-start gap-3">
+                          <BadgeAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-bold uppercase tracking-wider mb-1">Submission Failure</p>
+                            <p className="text-red-300 font-sans text-xs">{enquiryError}</p>
+                          </div>
+                        </div>
+                      )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Phone Number */}
-                      <div className="space-y-1">
-                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Phone Number *</label>
-                        <div className="flex gap-2">
-                          <select 
-                            value={enquiryForm.countryCode}
-                            onChange={(e) => setEnquiryForm({...enquiryForm, countryCode: e.target.value})}
-                            className="bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50 shrink-0 w-[110px] cursor-pointer"
-                          >
-                            <option value="+91">IND +91</option>
-                            <option value="+1">USA +1</option>
-                            <option value="+44">GBR +44</option>
-                            <option value="+61">AUS +61</option>
-                            <option value="+971">UAE +971</option>
-                          </select>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Full Name */}
+                        <div className="space-y-1">
+                          <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Full Name *</label>
                           <input 
-                            type="tel" 
+                            name="fullName"
+                            type="text" 
                             required
-                            value={enquiryForm.phoneNumber}
-                            onChange={(e) => setEnquiryForm({...enquiryForm, phoneNumber: e.target.value})}
-                            placeholder="+91 XXXXXXXXXX"
-                            className="flex-1 bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
+                            value={enquiryForm.fullName}
+                            onChange={(e) => setEnquiryForm({...enquiryForm, fullName: e.target.value})}
+                            placeholder="Jane Doe"
+                            className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
+                          />
+                        </div>
+
+                        {/* Work Email */}
+                        <div className="space-y-1">
+                          <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Work Email *</label>
+                          <input 
+                            name="email"
+                            type="email" 
+                            required
+                            value={enquiryForm.workEmail}
+                            onChange={(e) => setEnquiryForm({...enquiryForm, workEmail: e.target.value})}
+                            placeholder="jane@company.com"
+                            className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
                           />
                         </div>
                       </div>
 
-                      {/* Where did you hear about us */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Company Name */}
+                        <div className="space-y-1">
+                          <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Company Name</label>
+                          <input 
+                            name="company"
+                            type="text" 
+                            value={enquiryForm.companyName}
+                            onChange={(e) => setEnquiryForm({...enquiryForm, companyName: e.target.value})}
+                            placeholder="Acme Corp"
+                            className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
+                          />
+                        </div>
+
+                        {/* Team Size */}
+                        <div className="space-y-1">
+                          <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Team Size</label>
+                          <select 
+                            name="teamSize"
+                            value={enquiryForm.teamSize}
+                            onChange={(e) => setEnquiryForm({...enquiryForm, teamSize: e.target.value})}
+                            className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50"
+                          >
+                            <option value="1">1 person</option>
+                            <option value="2-15">2 - 15 people</option>
+                            <option value="15+">15+ people</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Phone Number */}
+                        <div className="space-y-1">
+                          <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Phone Number *</label>
+                          <div className="flex gap-2">
+                            <select 
+                              value={enquiryForm.countryCode}
+                              onChange={(e) => setEnquiryForm({...enquiryForm, countryCode: e.target.value})}
+                              className="bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50 shrink-0 w-[110px] cursor-pointer"
+                            >
+                              <option value="+91">IND +91</option>
+                              <option value="+1">USA +1</option>
+                              <option value="+44">GBR +44</option>
+                              <option value="+61">AUS +61</option>
+                              <option value="+971">UAE +971</option>
+                            </select>
+                            <input 
+                              name="phone"
+                              type="tel" 
+                              required
+                              value={enquiryForm.phoneNumber}
+                              onChange={(e) => setEnquiryForm({...enquiryForm, phoneNumber: e.target.value})}
+                              placeholder="+91 XXXXXXXXXX"
+                              className="flex-1 bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Where did you hear about us */}
+                        <div className="space-y-1">
+                          <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Where did you hear about us? *</label>
+                          <select 
+                            name="source"
+                            required
+                            value={enquiryForm.source}
+                            onChange={(e) => setEnquiryForm({...enquiryForm, source: e.target.value})}
+                            className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50 cursor-pointer"
+                          >
+                            <option value="" disabled>Select an option</option>
+                            <option value="LinkedIn">LinkedIn</option>
+                            <option value="Social Media">Social Media</option>
+                            <option value="Google">Google</option>
+                            <option value="Referral">Referral</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Program Interested In */}
                       <div className="space-y-1">
-                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Where did you hear about us? *</label>
+                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Program Interested In</label>
                         <select 
-                          required
-                          value={enquiryForm.source}
-                          onChange={(e) => setEnquiryForm({...enquiryForm, source: e.target.value})}
+                          name="program"
+                          value={enquiryForm.program}
+                          onChange={(e) => setEnquiryForm({...enquiryForm, program: e.target.value})}
                           className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50 cursor-pointer"
                         >
-                          <option value="" disabled>Select an option</option>
-                          <option value="LinkedIn">LinkedIn</option>
-                          <option value="Social Media">Social Media</option>
-                          <option value="Google">Google</option>
-                          <option value="Referral">Referral</option>
-                          <option value="Other">Other</option>
+                          <option value="Base Cohort">Base Cohort (6-Day Sprint)</option>
+                          <option value="Premium Alpha">Premium Alpha (13-Day Deep Dive)</option>
                         </select>
                       </div>
-                    </div>
 
-                    {/* Program Interested In */}
-                    <div className="space-y-1">
-                      <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Program Interested In</label>
-                      <select 
-                        value={enquiryForm.program}
-                        onChange={(e) => setEnquiryForm({...enquiryForm, program: e.target.value})}
-                        className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white focus:outline-none focus:border-cyan/50"
+                      {/* Query */}
+                      <div className="space-y-1">
+                        <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Describe your scaling or automation query *</label>
+                        <textarea 
+                          name="message"
+                          required
+                          rows={4}
+                          value={enquiryForm.query}
+                          onChange={(e) => setEnquiryForm({...enquiryForm, query: e.target.value})}
+                          placeholder="Briefly tell us what processes you are trying to automate or scale with AI..."
+                          className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50 resize-none"
+                        />
+                      </div>
+
+                      {/* Submit button */}
+                      <button
+                        type="submit"
+                        disabled={enquirySubmitting}
+                        className="w-full py-3 bg-cyan text-[#16171D] font-mono text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all rounded cursor-pointer mt-4 flex items-center justify-center gap-2 disabled:opacity-50"
                       >
-                        <option value="Base Cohort">Base Cohort (6-Day Sprint)</option>
-                        <option value="Premium Alpha">Premium Alpha (13-Day Deep Dive)</option>
-                        <option value="Both">Both Tracks (Comprehensive Alignment)</option>
-                      </select>
-                    </div>
-
-                    {/* Query */}
-                    <div className="space-y-1">
-                      <label className="block font-mono text-[10px] uppercase text-[#A0A2B0] tracking-wider">Describe your scaling or automation query *</label>
-                      <textarea 
-                        required
-                        rows={4}
-                        value={enquiryForm.query}
-                        onChange={(e) => setEnquiryForm({...enquiryForm, query: e.target.value})}
-                        placeholder="Briefly tell us what processes you are trying to automate or scale with AI..."
-                        className="w-full bg-[#0D0E12]/80 border border-[#2a2c35] rounded px-3.5 py-2 text-xs font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan/50 resize-none"
-                      />
-                    </div>
-
-                    {/* Submit button */}
-                    <button
-                      type="submit"
-                      className="w-full py-3 bg-cyan text-[#16171D] font-mono text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all rounded cursor-pointer mt-4"
-                    >
-                      Submit Enquiry
-                    </button>
-                  </form>
+                        {enquirySubmitting ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Submitting Enquiry...</span>
+                          </>
+                        ) : (
+                          <span>Submit Enquiry</span>
+                        )}
+                      </button>
+                    </form>
+                  )}
                 </div>
 
               </div>
@@ -3398,6 +3629,7 @@ export default function App() {
           </>
         )}
       </main>
+      )}
 
       {/* Persistent Footer Area */}
       <footer className="w-full py-16 bg-[#040507] border-t border-[#1d1f27] px-6 md:px-12 z-20 relative">
@@ -3429,36 +3661,31 @@ export default function App() {
             {/* Social Icons & Interactive Currency switcher */}
             <div className="flex flex-wrap items-center gap-3 mt-4">
               <a 
-                href="#" 
-                onClick={(e) => { e.preventDefault(); showNotification("Connecting to Facebook secure routing..."); }}
-                className="w-8 h-8 rounded border border-[#1d1f27] bg-[#090b0e] flex items-center justify-center text-[#8e919e] hover:text-cyan hover:border-cyan/50 hover:bg-[#0c0f14] transition-all" 
-                aria-label="Facebook"
-              >
-                <Facebook className="w-4 h-4" />
-              </a>
-              <a 
-                href="#" 
-                onClick={(e) => { e.preventDefault(); showNotification("Connecting to Instagram secure routing..."); }}
+                href="https://www.instagram.com/codexiaindia?igsh=MTBnaG03bjh1Y2twcw==" 
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-8 h-8 rounded border border-[#1d1f27] bg-[#090b0e] flex items-center justify-center text-[#8e919e] hover:text-cyan hover:border-cyan/50 hover:bg-[#0c0f14] transition-all" 
                 aria-label="Instagram"
               >
                 <Instagram className="w-4 h-4" />
               </a>
               <a 
-                href="#" 
-                onClick={(e) => { e.preventDefault(); showNotification("Connecting to LinkedIn secure routing..."); }}
-                className="w-8 h-8 rounded border border-[#1d1f27] bg-[#090b0e] flex items-center justify-center text-[#8e919e] hover:text-cyan hover:border-cyan/50 hover:bg-[#0c0f14] transition-all" 
-                aria-label="LinkedIn"
-              >
-                <Linkedin className="w-4 h-4" />
-              </a>
-              <a 
-                href="#" 
-                onClick={(e) => { e.preventDefault(); showNotification("Connecting to Twitter secure routing..."); }}
+                href="https://x.com/CodexiaIndia" 
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-8 h-8 rounded border border-[#1d1f27] bg-[#090b0e] flex items-center justify-center text-[#8e919e] hover:text-cyan hover:border-cyan/50 hover:bg-[#0c0f14] transition-all" 
                 aria-label="Twitter"
               >
                 <Twitter className="w-4 h-4" />
+              </a>
+              <a 
+                href="https://www.linkedin.com/in/codexia-india-6a0758424/" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded border border-[#1d1f27] bg-[#090b0e] flex items-center justify-center text-[#8e919e] hover:text-cyan hover:border-cyan/50 hover:bg-[#0c0f14] transition-all" 
+                aria-label="LinkedIn"
+              >
+                <Linkedin className="w-4 h-4" />
               </a>
               
               <div className="relative inline-block text-left ml-auto sm:ml-0">
@@ -3651,36 +3878,52 @@ export default function App() {
               </h4>
               <ul className="space-y-2">
                 <li>
-                  <button 
-                    onClick={() => showNotification("Secure documentation is accessible via the circular AI agent workspace.")}
-                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer"
+                  <a 
+                    href="/about"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateToPage("/about");
+                    }}
+                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer block"
                   >
-                    System Documentation
-                  </button>
+                    About Us
+                  </a>
                 </li>
                 <li>
-                  <button 
-                    onClick={() => showNotification("Terms of Service: All interactions must conform with decentralized ledger integrity guidelines.")}
-                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer"
+                  <a 
+                    href="/terms"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateToPage("/terms");
+                    }}
+                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer block"
                   >
-                    Terms of Integration
-                  </button>
+                    Terms & Conditions
+                  </a>
                 </li>
                 <li>
-                  <button 
-                    onClick={() => showNotification("Privacy Safeguards: Zero telemetry records are sold or exported to secondary centralized cloud nodes.")}
-                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer"
+                  <a 
+                    href="/privacy"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateToPage("/privacy");
+                    }}
+                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer block"
                   >
-                    Privacy Safeguards
-                  </button>
+                    Privacy Policy
+                  </a>
                 </li>
                 <li>
-                  <button 
-                    onClick={() => showNotification("Refund Parameters: Reallocation of reserved seats valid up to 48 hours before Day 1 execution cycle.")}
-                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer"
+                  <a 
+                    href="/refund-policy"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateToPage("/refund-policy");
+                    }}
+                    className="font-sans text-xs text-[#8e919e] hover:text-cyan hover:underline transition-colors text-left cursor-pointer block"
                   >
-                    Refund Parameters
-                  </button>
+                    Refund Policy
+                  </a>
                 </li>
               </ul>
             </div>
@@ -3688,6 +3931,13 @@ export default function App() {
 
         </div>
       </footer>
+
+      {/* Legal & Policy Dashboard Modal */}
+      <LegalPolicyModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        defaultTab={legalModalTab}
+      />
 
       {/* Google OAuth Identity Modal */}
       <GoogleOAuthModal
@@ -3710,6 +3960,7 @@ export default function App() {
         tier={selectedPricingTier}
         currency={pricingCurrency}
         masterclassActive={masterclassActive}
+        onOpenLegal={handleOpenLegalModal}
       />
 
       {/* Razorpay Checkout Modal Integration */}
@@ -3721,6 +3972,7 @@ export default function App() {
         }}
         tier={selectedPricingTier}
         onPaymentSuccess={handlePaymentSuccess}
+        onOpenLegal={handleOpenLegalModal}
       />
 
       {/* Autonomous Cybernetic AI Agent (Circular persistent widget) */}
