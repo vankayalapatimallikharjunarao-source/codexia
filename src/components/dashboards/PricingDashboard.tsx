@@ -14,6 +14,7 @@ interface PricingDashboardProps {
   keyId: string;
   masterclassActive: boolean;
   masterclassTimeLeft: number;
+  paymentBannerMessage?: string | null;
 }
 
 export default function PricingDashboard({
@@ -23,7 +24,8 @@ export default function PricingDashboard({
   showNotification,
   keyId,
   masterclassActive,
-  masterclassTimeLeft
+  masterclassTimeLeft,
+  paymentBannerMessage
 }: PricingDashboardProps) {
   const [useUSD, setUseUSD] = useState<boolean>(false);
   const [paymentHistory, setPaymentHistory] = useState([
@@ -68,6 +70,20 @@ export default function PricingDashboard({
           </div>
         </div>
       </header>
+
+      {/* Payment Gateway Alert / Failed Status Banner */}
+      {paymentBannerMessage && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 p-4 bg-red-500/10 border-2 border-red-500/50 rounded-xl flex items-center justify-between text-red-400 font-mono text-xs shadow-lg backdrop-blur-md"
+        >
+          <div className="flex items-center gap-3">
+            <span className="w-3 h-3 bg-red-500 rounded-full animate-ping shrink-0" />
+            <span className="font-bold uppercase tracking-wider">{paymentBannerMessage}</span>
+          </div>
+        </motion.div>
+      )}
 
       {/* Dynamic Masterclass Promo Alert Banner */}
       {masterclassActive && (

@@ -18,10 +18,18 @@ import {
   Sparkles,
   Edit3,
   Trash2,
-  Edit
+  Edit,
+  Github,
+  Pencil,
+  Check,
+  X,
+  ArrowLeft
 } from "lucide-react";
-import { Cohort, StudentProfile } from "../../types";
+import { Cohort, StudentProfile, SyllabusDay } from "../../types";
 import { googleSignIn, createMeetSpace, getAccessToken } from "../../lib/googleMeet";
+import CohortDocumentsPage from "./CohortDocumentsPage";
+import CohortCommunityMeshPage from "./CohortCommunityMeshPage";
+import StudentDashboard from "./StudentDashboard";
 
 interface AdminCurriculumCalendarProps {
   sessionToken?: string | null;
@@ -43,29 +51,29 @@ const MONTHS = [
   { value: 12, name: "December" }
 ];
 
-const bSyllabusDays = [
-  { id: "day-1", title: "AI Basics & the Micro-Bot Idea", dayNumber: 1 },
-  { id: "day-2", title: "Building Your First Micro-Bot", dayNumber: 2 },
-  { id: "day-3", title: "Micro-Bots for Your Profession", dayNumber: 3 },
-  { id: "day-4", title: "Connecting Your Bot to Real Tools", dayNumber: 4 },
-  { id: "day-5", title: "Making It Visual: Quick Video & Image Content", dayNumber: 5 },
-  { id: "day-6", title: "Capstone: Ship Your Micro-Bot", dayNumber: 6 }
+const bSyllabusDays: SyllabusDay[] = [
+  { id: "day-1", title: "AI Basics & the Micro-Bot Idea", dayNumber: "1" },
+  { id: "day-2", title: "Building Your First Micro-Bot", dayNumber: "2" },
+  { id: "day-3", title: "Micro-Bots for Your Profession", dayNumber: "3" },
+  { id: "day-4", title: "Connecting Your Bot to Real Tools", dayNumber: "4" },
+  { id: "day-5", title: "Making It Visual: Quick Video & Image Content", dayNumber: "5" },
+  { id: "day-6", title: "Capstone: Ship Your Micro-Bot", dayNumber: "6" }
 ];
 
-const pSyllabusDays = [
-  { id: "pday-1", title: "Systems Thinking: Mapping a Workflow to Bots", dayNumber: 1 },
-  { id: "pday-2", title: "Designing Multiple Bots That Work Together", dayNumber: 2 },
-  { id: "pday-3", title: "Voice & Conversational Bots", dayNumber: 3 },
-  { id: "pday-4", title: "Web Scraping & Data Gathering Bots", dayNumber: 4 },
-  { id: "pday-5", title: "Writing Assistants that Adapt to Your Style", dayNumber: 5 },
-  { id: "pday-6", title: "AI-Powered Customer Support & Email Auto-Replies", dayNumber: 6 },
-  { id: "pday-7", title: "Research & Analysis Bots", dayNumber: 7 },
-  { id: "pday-8", title: "Dynamic Marketing Image Generation", dayNumber: 8 },
-  { id: "pday-9", title: "Automation: Handling File Uploads", dayNumber: 9 },
-  { id: "pday-10", title: "Complex Workflows with Webhook Triggers", dayNumber: 10 },
-  { id: "pday-11", title: "AI Voiceovers & Audio Editing on Autopilot", dayNumber: 11 },
-  { id: "pday-12", title: "Creating Stitched AI Video Walkthroughs", dayNumber: 12 },
-  { id: "pday-13", title: "Graduate Presentation & Professional Roadmap", dayNumber: 13 }
+const pSyllabusDays: SyllabusDay[] = [
+  { id: "pday-1", title: "Systems Thinking: Mapping a Workflow to Bots", dayNumber: "1" },
+  { id: "pday-2", title: "Designing Multiple Bots That Work Together", dayNumber: "2" },
+  { id: "pday-3", title: "Voice & Conversational Bots", dayNumber: "3" },
+  { id: "pday-4", title: "Web Scraping & Data Gathering Bots", dayNumber: "4" },
+  { id: "pday-5", title: "Writing Assistants that Adapt to Your Style", dayNumber: "5" },
+  { id: "pday-6", title: "AI-Powered Customer Support & Email Auto-Replies", dayNumber: "6" },
+  { id: "pday-7", title: "Research & Analysis Bots", dayNumber: "7" },
+  { id: "pday-8", title: "Dynamic Marketing Image Generation", dayNumber: "8" },
+  { id: "pday-9", title: "Automation: Handling File Uploads", dayNumber: "9" },
+  { id: "pday-10", title: "Complex Workflows with Webhook Triggers", dayNumber: "10" },
+  { id: "pday-11", title: "AI Voiceovers & Audio Editing on Autopilot", dayNumber: "11" },
+  { id: "pday-12", title: "Creating Stitched AI Video Walkthroughs", dayNumber: "12" },
+  { id: "pday-13", title: "Graduate Presentation & Professional Roadmap", dayNumber: "13" }
 ];
 
 export default function AdminCurriculumCalendar({
@@ -105,6 +113,45 @@ export default function AdminCurriculumCalendar({
   const [editCapacity, setEditCapacity] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [deletingCohortId, setDeletingCohortId] = useState<string | null>(null);
+
+  // Mesh Repo edit & Dedicated views state
+  const [isEditingRepoUrl, setIsEditingRepoUrl] = useState(false);
+  const [editRepoUrlValue, setEditRepoUrlValue] = useState("");
+  const [isSavingRepoUrl, setIsSavingRepoUrl] = useState(false);
+  const [viewingDocsCohort, setViewingDocsCohort] = useState<Cohort | null>(null);
+  const [viewingCommunityCohort, setViewingCommunityCohort] = useState<Cohort | null>(null);
+  const [viewingStudentWorkspaceCohort, setViewingStudentWorkspaceCohort] = useState<Cohort | null>(null);
+
+  const handleSaveRepoUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeCohortDetails) return;
+    setIsSavingRepoUrl(true);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`/api/cohorts/${activeCohortDetails.id}/repo_url`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ repo_url: editRepoUrlValue.trim() })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const updatedUrl = editRepoUrlValue.trim();
+        const updatedCohort = data.cohort || { ...activeCohortDetails, repo_url: updatedUrl };
+        setActiveCohortDetails(updatedCohort);
+        setCohortsList(prev => prev.map(c => c.id === activeCohortDetails.id ? { ...c, repo_url: updatedUrl } : c));
+        showNotification(`SUCCESS // Updated repository URL for cohort [${activeCohortDetails.id}]`);
+        setIsEditingRepoUrl(false);
+      } else {
+        const err = await res.json();
+        showNotification(`ERROR // Failed to update repo URL: ${err.error || "Unknown"}`);
+      }
+    } catch (err: any) {
+      showNotification(`ERROR // Connection error: ${err.message || err}`);
+    } finally {
+      setIsSavingRepoUrl(false);
+    }
+  };
 
   // Sync capacity with track type defaults
   useEffect(() => {
@@ -459,6 +506,75 @@ export default function AdminCurriculumCalendar({
   };
 
   const monthlyCohorts = cohortsList.filter(c => c.year === selectedYear && c.month === selectedMonth);
+
+  if (viewingDocsCohort) {
+    return (
+      <CohortDocumentsPage
+        cohortId={viewingDocsCohort.id}
+        cohortData={viewingDocsCohort}
+        isAdmin={true}
+        sessionToken={sessionToken}
+        onBack={() => setViewingDocsCohort(null)}
+        showNotification={showNotification}
+      />
+    );
+  }
+
+  if (viewingCommunityCohort) {
+    return (
+      <CohortCommunityMeshPage
+        cohortId={viewingCommunityCohort.id}
+        cohortData={viewingCommunityCohort}
+        isAdmin={true}
+        sessionToken={sessionToken}
+        currentUserEmail="admin@codexia.edu"
+        onBack={() => setViewingCommunityCohort(null)}
+        showNotification={showNotification}
+      />
+    );
+  }
+
+  if (viewingStudentWorkspaceCohort) {
+    return (
+      <div className="space-y-4 font-mono text-xs">
+        <div className="flex items-center justify-between bg-[#16171D] border border-cyan/40 p-3 rounded-xl shadow-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-cyan font-bold uppercase text-[10px] tracking-wider flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-cyan" />
+              ADMIN WORKSPACE PREVIEW // STUDENT DESK PORTAL
+            </span>
+            <span className="bg-cyan/10 text-cyan border border-cyan/20 px-2.5 py-0.5 rounded text-[8.5px] font-bold">
+              {viewingStudentWorkspaceCohort.id}
+            </span>
+            <span className="text-[8.5px] text-slate-400 font-bold uppercase">
+              ({viewingStudentWorkspaceCohort.track === "premium" ? "👑 Premium Alpha" : "💻 Base Cohort"})
+            </span>
+          </div>
+          <button
+            onClick={() => setViewingStudentWorkspaceCohort(null)}
+            className="px-3.5 py-1.5 bg-cyan text-black font-extrabold uppercase text-[9px] rounded-lg hover:opacity-90 transition-all cursor-pointer flex items-center gap-1.5 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
+            id="exit-student-desk-btn"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            RETURN TO CURRICULUM CONTROLLER
+          </button>
+        </div>
+        <StudentDashboard
+          syllabus={viewingStudentWorkspaceCohort.track === "premium" ? pSyllabusDays : bSyllabusDays}
+          onNewLog={() => {}}
+          showNotification={showNotification}
+          userTier={viewingStudentWorkspaceCohort.track === "premium" ? "premium" : "standard"}
+          userRole="admin"
+          userTrack={viewingStudentWorkspaceCohort.track}
+          userCohortId={viewingStudentWorkspaceCohort.id}
+          sessionToken={sessionToken}
+          currentUserEmail="admin@codexia.edu"
+          hasPaid={true}
+          onClose={() => setViewingStudentWorkspaceCohort(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 font-mono text-xs">
@@ -1110,83 +1226,169 @@ export default function AdminCurriculumCalendar({
                   )}
                 </div>
 
-                {/* Cohort Documents Section */}
-                <div className="space-y-2">
-                  <span className="font-bold text-white uppercase tracking-widest flex items-center gap-1.5 text-[8px]">
-                    <FileText className="w-3.5 h-3.5 text-cyan" />
-                    COHORT RESOURCES
-                  </span>
-                  
-                  {activeCohortDetails.documents && activeCohortDetails.documents.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {activeCohortDetails.documents.map((doc, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between p-1.5 rounded bg-black/40 border border-[#2a2c35]/40 text-[8px] text-slate-300 hover:text-white transition-all"
+                {/* COHORT SECURED RESOURCES MESH (Image 1 Format) */}
+                <div className="bg-[#16171D]/40 border border-[#2a2c35] p-4 rounded-xl space-y-3">
+                  <div className="flex justify-between items-center pb-2 border-b border-[#2a2c35]/60">
+                    <span className="font-bold text-white uppercase tracking-widest flex items-center gap-1.5 text-[9px]">
+                      <Layers className="w-4 h-4 text-cyan" />
+                      COHORT SECURED RESOURCES MESH
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-[8.5px] uppercase font-bold text-white">
+                    {/* 1. Github Repositories */}
+                    {isEditingRepoUrl ? (
+                      <div className="p-2.5 bg-black/80 border border-cyan/60 rounded space-y-2 font-mono">
+                        <div className="flex items-center justify-between text-[7.5px] text-cyan font-bold">
+                          <span>EDIT REPOSITORY LINK [{activeCohortDetails.id}]</span>
+                          <button 
+                            type="button" 
+                            onClick={() => setIsEditingRepoUrl(false)} 
+                            className="text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <form onSubmit={handleSaveRepoUrl} className="flex gap-2">
+                          <input
+                            type="url"
+                            value={editRepoUrlValue}
+                            onChange={(e) => setEditRepoUrlValue(e.target.value)}
+                            placeholder="https://github.com/org/cohort-repo"
+                            className="flex-1 bg-black border border-[#2a2c35] focus:border-cyan text-white px-2 py-1 rounded text-[8.5px] font-mono normal-case outline-none"
+                            autoFocus
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSavingRepoUrl}
+                            className="px-2 py-1 bg-cyan text-black font-extrabold text-[7.5px] rounded hover:opacity-90 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Check className="w-3 h-3" />
+                            {isSavingRepoUrl ? "SAVING..." : "SAVE"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingRepoUrl(false)}
+                            className="px-2 py-1 bg-white/10 text-white font-bold text-[7.5px] rounded hover:bg-white/20 transition-all cursor-pointer"
+                          >
+                            CANCEL
+                          </button>
+                        </form>
+                      </div>
+                    ) : activeCohortDetails.repo_url && activeCohortDetails.repo_url.trim() !== "" ? (
+                      <div className="p-2.5 bg-black/40 border border-[#2a2c35] hover:border-cyan rounded flex items-center justify-between group transition-all">
+                        <a 
+                          href={activeCohortDetails.repo_url} 
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => showNotification("Navigating to cohort GitHub repository...")}
+                          className="flex items-center gap-2 flex-1 min-w-0"
+                          id="admin-mesh-github-link"
                         >
-                          <span className="truncate max-w-[170px] uppercase font-mono">
-                            {doc.name}
-                          </span>
-                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="w-3 h-3 text-slate-500 hover:text-cyan transition-colors" />
+                          <Github className="w-3.5 h-3.5 text-cyan shrink-0" />
+                          <span className="truncate">GITHUB REPOSITORIES</span>
+                        </a>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setEditRepoUrlValue(activeCohortDetails.repo_url || "");
+                              setIsEditingRepoUrl(true);
+                            }}
+                            className="p-1 hover:bg-cyan/20 text-slate-400 hover:text-cyan rounded transition-colors cursor-pointer"
+                            title="Edit repository URL for this cohort"
+                            id="admin-edit-github-repo-btn"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <a 
+                            href={activeCohortDetails.repo_url} 
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-slate-500 group-hover:text-cyan transition-colors"
+                          >
+                            <ExternalLink className="w-3 h-3" />
                           </a>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-2 border border-dashed border-[#2a2c35] rounded text-center text-slate-500 text-[8px] uppercase">
-                      No custom resources uploaded yet.
-                    </div>
-                  )}
+                      </div>
+                    ) : (
+                      <div className="p-2.5 bg-black/40 border border-[#2a2c35] rounded flex items-center justify-between transition-all">
+                        <div className="flex items-center gap-2 text-slate-400">
+                          <Github className="w-3.5 h-3.5 text-slate-500" />
+                          <span>GITHUB REPOSITORIES</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-white/5 border border-white/10 text-slate-400 px-2 py-0.5 rounded text-[7px] font-mono normal-case font-medium">
+                            No repository linked yet
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setEditRepoUrlValue("");
+                              setIsEditingRepoUrl(true);
+                            }}
+                            className="p-1 hover:bg-cyan/20 text-slate-400 hover:text-cyan rounded transition-colors cursor-pointer"
+                            title="Add repository URL for this cohort"
+                            id="admin-add-github-repo-btn"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. Cohort Documents (opens dedicated full-page viewer) */}
+                    <button 
+                      onClick={() => setViewingDocsCohort(activeCohortDetails)}
+                      className="w-full text-left p-2.5 bg-black/40 border border-[#2a2c35] hover:border-cyan rounded flex items-center justify-between group transition-all cursor-pointer"
+                      id="admin-open-documents-btn"
+                    >
+                      <span className="flex items-center gap-2">
+                        <BookOpen className="w-3.5 h-3.5 text-cyan" />
+                        COHORT DOCUMENTS
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="bg-cyan/10 text-cyan border border-cyan/20 px-1.5 py-0.5 rounded text-[7px] font-mono font-bold">
+                          DEDICATED VIEW
+                        </span>
+                        <ExternalLink className="w-3 h-3 text-slate-500 group-hover:text-cyan transition-colors" />
+                      </div>
+                    </button>
+
+                    {/* 3. Cohort Community Mesh (opens dedicated full-page mesh) */}
+                    <button 
+                      onClick={() => setViewingCommunityCohort(activeCohortDetails)}
+                      className="w-full text-left p-2.5 bg-black/40 border border-[#2a2c35] hover:border-cyan rounded flex items-center justify-between group transition-all cursor-pointer"
+                      id="admin-open-community-btn"
+                    >
+                      <span className="flex items-center gap-2">
+                        <MessageSquare className="w-3.5 h-3.5 text-cyan" />
+                        COHORT COMMUNITY MESH
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="bg-cyan/10 text-cyan border border-cyan/20 px-1.5 py-0.5 rounded text-[7px] font-mono font-bold">
+                          SECURED NODE
+                        </span>
+                        <ExternalLink className="w-3 h-3 text-slate-500 group-hover:text-cyan transition-colors" />
+                      </div>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Prompt & Template Vault Section (Premium only) */}
-                {activeCohortDetails.track === "premium" && (
-                  <div className="space-y-2 bg-[#1e2e2e]/20 border border-cyan/20 p-3 rounded-lg">
-                    <span className="font-bold text-cyan uppercase tracking-widest flex items-center gap-1.5 text-[8.5px]">
-                      <Sparkles className="w-3.5 h-3.5 text-cyan animate-pulse" />
-                      TEMPLATE & PROMPT VAULT
-                    </span>
-                    <p className="text-[7.5px] text-slate-400 uppercase leading-relaxed font-mono">
-                      Central library of downloadable bot templates and prompt files shared across premium cohorts. Access the Student Portal view to manage or download entries.
-                    </p>
-                  </div>
-                )}
-
-                {/* Cohort Community History Section */}
-                <div className="space-y-2">
-                  <span className="font-bold text-white uppercase tracking-widest flex items-center gap-1.5 text-[8px]">
-                    <MessageSquare className="w-3.5 h-3.5 text-cyan" />
-                    COHORT COMMUNITY HISTORY
-                  </span>
-                  
-                  {isLoadingDetails ? (
-                    <div className="text-[8px] font-mono text-slate-500 uppercase animate-pulse">
-                      LOADING COHORT POSTS...
-                    </div>
-                  ) : cohortPosts.length === 0 ? (
-                    <div className="p-3 border border-dashed border-[#2a2c35] bg-black/20 rounded text-center text-slate-500 text-[8px] uppercase font-mono">
-                      No community discussions or announcements logged yet.
-                    </div>
-                  ) : (
-                    <div className="max-h-56 overflow-y-auto border border-[#2a2c35] rounded bg-black/40 p-2 space-y-3.5">
-                      {cohortPosts.map((post) => (
-                        <div key={post.id} className="space-y-1 border-b border-[#2a2c35]/30 pb-2 last:border-b-0 last:pb-0">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[8px] font-bold text-slate-300">
-                              {post.author_name}
-                            </span>
-                            <span className="text-[7px] text-slate-500 uppercase font-mono">
-                              {post.created_at}
-                            </span>
-                          </div>
-                          <p className="text-[8px] text-slate-400 uppercase leading-relaxed font-mono">
-                            {post.content}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                {/* Open full Student Desk Workspace button */}
+                <div className="pt-2">
+                  <button
+                    onClick={() => setViewingStudentWorkspaceCohort(activeCohortDetails)}
+                    className="w-full py-2.5 bg-cyan text-black font-extrabold uppercase text-[8.5px] tracking-widest rounded hover:opacity-90 transition-all cursor-pointer shadow-[0_0_15px_rgba(34,211,238,0.2)] flex items-center justify-center gap-2"
+                    id="launch-student-workspace-btn"
+                  >
+                    <Users className="w-4 h-4" />
+                    OPEN FULL STUDENT DESK WORKSPACE
+                  </button>
                 </div>
 
                 {/* Read only summary notice if Archived */}

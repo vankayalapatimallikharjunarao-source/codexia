@@ -75,8 +75,11 @@ export interface StudentFeedback {
 }
 
 export interface CohortDocument {
+  id?: string;
   name: string;
   file_url: string;
+  fileName?: string;
+  mimeType?: string;
   uploaded_at: string;
 }
 
@@ -104,6 +107,23 @@ export interface StudentProfile {
   track: "base" | "premium" | null;
   cohort_id: string | null;
   username?: string;
+  name?: string;
+  phone?: string;
+  certificate_name?: string;
+  is_completed?: boolean;
+  completed_at?: string;
+}
+
+export interface GeneratedCertificate {
+  certificate_id: string;
+  student_email: string;
+  student_name: string;
+  program: string;
+  cohort_id: string;
+  completion_date: string;
+  generated_at: string;
+  download_url: string;
+  file_id: string;
 }
 
 export interface VaultEntry {

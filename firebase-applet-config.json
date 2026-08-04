@@ -1,9 +1,11 @@
 {
-  "projectId": "fiery-cipher-14dh4",
-  "appId": "1:466694654433:web:8f199c500a7470fe41eaa0",
-  "apiKey": "AIzaSyBzbMMuqvN2kg7MJUnyLKPpXskC8R2VpZw",
-  "authDomain": "fiery-cipher-14dh4.firebaseapp.com",
-  "storageBucket": "fiery-cipher-14dh4.firebasestorage.app",
-  "messagingSenderId": "466694654433",
-  "measurementId": ""
+  "projectId": "codexia-web",
+  "appId": "1:235162700852:web:91560af2691ac52e188e61",
+  "apiKey": "AIzaSyAEMBqOaUo-Hb5glIKv9CyxFqv6Yb16LPg",
+  "authDomain": "codexia-web.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-codexia-83d18cdd-f8f3-49b4-a8dd-105583acd04d",
+  "storageBucket": "codexia-web.firebasestorage.app",
+  "messagingSenderId": "235162700852",
+  "measurementId": "",
+  "recaptchaSiteKey": ""
 }

@@ -54,7 +54,7 @@ function getYouTubeId(url: string): string {
 }
 
 export default function StudentTestimonials() {
-  const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  const [testimonials, setTestimonials] = useState<Testimonial[]>(defaultTestimonials);
   const [selectedTestimonial, setSelectedTestimonial] = useState<Testimonial | null>(null);
   
   // Local video player simulation states
@@ -75,30 +75,61 @@ export default function StudentTestimonials() {
   const [newType, setNewType] = useState<"youtube" | "local">("local");
   const [newVideoUrl, setNewVideoUrl] = useState("");
   const [upvotedIds, setUpvotedIds] = useState<Record<string, boolean>>({});
+  const [runningCohorts, setRunningCohorts] = useState<Array<{ id: string; name: string }>>([]);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Fetch running cohorts dynamically from backend
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCohorts = async () => {
+      try {
+        const res = await fetch("/api/public/cohorts");
+        if (!isMounted) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setRunningCohorts(data);
+            setNewCohort((prev) => {
+              const exists = data.some((c: any) => c.name === prev);
+              return exists ? prev : data[0].name;
+            });
+          }
+        }
+      } catch {
+        // preserve current fallback
+      }
+    };
+    fetchCohorts();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Initialize and load from Server State
   useEffect(() => {
+    let isMounted = true;
     const fetchTestimonials = async () => {
       try {
         const res = await fetch("/api/state");
-        if (res.ok) {
+        if (!isMounted) return;
+        const contentType = res.headers.get("content-type");
+        if (res.ok && contentType && contentType.includes("application/json")) {
           const data = await res.json();
-          if (data.student_testimonials) {
+          if (data && Array.isArray(data.student_testimonials) && data.student_testimonials.length > 0) {
             setTestimonials(data.student_testimonials);
-          } else {
-            setTestimonials(defaultTestimonials);
           }
         }
-      } catch (e) {
-        console.error("Failed to load testimonials from server state:", e);
-        setTestimonials(defaultTestimonials);
+      } catch {
+        // Silently preserve current testimonials state on network glitch
       }
     };
     fetchTestimonials();
-    const interval = setInterval(fetchTestimonials, 3000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchTestimonials, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   // Sync testimonials to Server when changed
@@ -309,15 +340,13 @@ export default function StudentTestimonials() {
                       <span>({test.upvotes})</span>
                     </button>
 
-                    {test.isCustom && (
-                      <button
-                        onClick={(e) => handleDelete(test.id, e)}
-                        className="text-slate-600 hover:text-red-400 transition-colors cursor-pointer p-0.5"
-                        title="Delete Testimonial"
-                      >
-                        <Trash2 className="w-2.5 h-2.5" />
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => handleDelete(test.id, e)}
+                      className="text-slate-600 hover:text-red-400 transition-colors cursor-pointer p-0.5"
+                      title="Delete Testimonial"
+                    >
+                      <Trash2 className="w-2.5 h-2.5" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -371,10 +400,21 @@ export default function StudentTestimonials() {
                     <select
                       value={newCohort}
                       onChange={(e) => setNewCohort(e.target.value)}
-                      className="w-full bg-[#16171D] border border-slate-800 focus:border-cyan focus:outline-none p-2.5 text-white rounded font-mono text-[9px] uppercase"
+                      className="w-full bg-[#16171D] border border-slate-800 focus:border-cyan focus:outline-none p-2.5 text-white rounded font-mono text-[9px] uppercase cursor-pointer"
                     >
-                      <option value="SRE & Swarm Load Balancing">SRE & Swarm Load Balancing</option>
-                      <option value="Multi-Agent Consensus Protocol">Multi-Agent Consensus Protocol</option>
+                      {runningCohorts.length > 0 ? (
+                        runningCohorts.map((c) => (
+                          <option key={c.id} value={c.name} className="bg-[#111218] text-white">
+                            {c.name.toUpperCase()}
+                          </option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="July 2026 Base Cohort">JULY 2026 BASE COHORT</option>
+                          <option value="July 2026 Premium Alpha Cohort">JULY 2026 PREMIUM ALPHA COHORT</option>
+                          <option value="August 2026 Base Cohort">AUGUST 2026 BASE COHORT</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 </div>

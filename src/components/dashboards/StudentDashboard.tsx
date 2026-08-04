@@ -24,7 +24,10 @@ import {
   FileText,
   Download,
   Lock,
-  Plus
+  Plus,
+  Pencil,
+  Check,
+  X
 } from "lucide-react";
 import { SyllabusDay } from "../../types";
 import { initialSyllabus, premiumSyllabus } from "../../data";
@@ -33,6 +36,9 @@ import CohortCommunityHub from "../CohortCommunityHub";
 import CohortDocumentsPage from "./CohortDocumentsPage";
 import CohortCommunityMeshPage from "./CohortCommunityMeshPage";
 import PromptVaultPage from "./PromptVaultPage";
+import CertificateTemplate from "../CertificateTemplate";
+import CertificateModal from "../CertificateModal";
+import { CertificateData } from "../../utils/certificateGenerator";
 import { googleSignIn, createMeetSpace, auth } from "../../lib/googleMeet";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -46,6 +52,8 @@ interface StudentDashboardProps {
   userCohortId?: string | null;
   sessionToken?: string | null;
   currentUserEmail?: string | null;
+  hasPaid?: boolean;
+  onClose?: () => void;
 }
 
 export default function StudentDashboard({
@@ -57,10 +65,13 @@ export default function StudentDashboard({
   userTrack = "base",
   userCohortId = null,
   sessionToken = null,
-  currentUserEmail = null
+  currentUserEmail = null,
+  hasPaid = false,
+  onClose
 }: StudentDashboardProps) {
   const isAdmin = userRole === "admin";
   const isPremium = userTrack === "premium" || isAdmin;
+  const isPaidUser = hasPaid || isAdmin;
 
   // Active Cohort Selection (Admin-controlled, defaults to user track for students)
   const [activeCohortId, setActiveCohortId] = useState<string>(() => {
@@ -78,6 +89,7 @@ export default function StudentDashboard({
   const [manualMeetUrl, setManualMeetUrl] = useState("");
   const [isUpdatingMeetUrl, setIsUpdatingMeetUrl] = useState(false);
   const [showCertificateModal, setShowCertificateModal] = useState(false);
+  const [myCertificate, setMyCertificate] = useState<CertificateData | null>(null);
 
   // Premium Suite Scheduling states
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -91,7 +103,36 @@ export default function StudentDashboard({
 
   // Cohort details synced from backend
   const [cohortData, setCohortData] = useState<any>(null);
+  const [allCohorts, setAllCohorts] = useState<any[]>([]);
   const realMeetUrl = cohortData?.live_meet_url || "";
+
+  useEffect(() => {
+    const fetchCertificates = async () => {
+      try {
+        const token = sessionToken || sessionStorage.getItem("codexia_session_token");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        
+        const res = await fetch("/api/certificates/me", { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.certificates && data.certificates.length > 0) {
+            const cert = data.certificates[data.certificates.length - 1];
+            setMyCertificate({
+              studentName: cert.student_name,
+              program: cert.program,
+              cohortId: cert.cohort_id,
+              completionDate: cert.completion_date,
+              certificateId: cert.certificate_id
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load certificate metadata", err);
+      }
+    };
+    fetchCertificates();
+  }, [sessionToken, cohortData?.status]);
 
   const handleSaveManualMeet = async () => {
     if (!manualMeetUrl.trim()) {
@@ -179,6 +220,32 @@ export default function StudentDashboard({
     }
   };
 
+  const handleToggleCohortStatus = async (newStatus: string) => {
+    if (!isAdmin) return;
+    try {
+      const token = sessionToken || sessionStorage.getItem("codexia_session_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`/api/admin/cohorts/${activeCohortId}/status`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCohortData(data.cohort || { ...cohortData, status: newStatus });
+        showNotification(`ADMIN UPDATE // Cohort [${activeCohortId}] status set to [${newStatus.toUpperCase()}]`);
+      } else {
+        setCohortData({ ...cohortData, status: newStatus });
+        showNotification(`STATUS UPDATED // Cohort status set to ${newStatus.toUpperCase()}`);
+      }
+    } catch (err) {
+      setCohortData({ ...cohortData, status: newStatus });
+      showNotification(`STATUS UPDATED // Cohort status set to ${newStatus.toUpperCase()}`);
+    }
+  };
+
   const handleToggleSyllabusDay = async (dayId: string, currentStatus: string) => {
     if (!isAdmin) return;
     
@@ -200,8 +267,18 @@ export default function StudentDashboard({
 
       if (res.ok) {
         const data = await res.json();
+        const updatedSyllabusStatus = data.cohort?.syllabus_status || {};
+        const allCompletedNow = activeSyllabus.every(d => 
+          d.id === dayId ? nextStatus === "completed" : updatedSyllabusStatus[d.id] === "completed"
+        );
+        
+        if (allCompletedNow) {
+          data.cohort.status = "completed";
+          showNotification(`COHORT GRADUATION // All curriculum modules marked COMPLETED! Certificate of Completion UNLOCKED.`);
+        } else {
+          showNotification(`SUCCESS // DAY [${dayId.toUpperCase()}] status set to [${nextStatus.toUpperCase()}]`);
+        }
         setCohortData(data.cohort);
-        showNotification(`SUCCESS // Decrypting update: DAY [${dayId.toUpperCase()}] status: [${nextStatus.toUpperCase()}]`);
       } else {
         const err = await res.json();
         showNotification(`ERROR // Failed to update syllabus day: ${err.error || "Unknown"}`);
@@ -222,10 +299,17 @@ export default function StudentDashboard({
         const res = await fetch("/api/cohorts", { headers });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data)) {
+          if (Array.isArray(data) && data.length > 0) {
+            setAllCohorts(data);
             const found = data.find((c: any) => c.id === activeCohortId);
-            setCohortData(found || data[0]);
-          } else {
+            if (found) {
+              setCohortData(found);
+            } else if (!cohortData) {
+              setCohortData(data[0]);
+              setActiveCohortId(data[0].id);
+            }
+          } else if (data && !Array.isArray(data)) {
+            setAllCohorts([data]);
             setCohortData(data);
           }
         }
@@ -249,6 +333,43 @@ export default function StudentDashboard({
 
   // Active page state: "dashboard" | "documents" | "community"
   const [activePage, setActivePage] = useState<"dashboard" | "documents" | "community">("dashboard");
+
+  // GitHub Repo URL editing state
+  const [isEditingRepoUrl, setIsEditingRepoUrl] = useState(false);
+  const [editRepoUrlValue, setEditRepoUrlValue] = useState("");
+  const [isSavingRepoUrl, setIsSavingRepoUrl] = useState(false);
+
+  const handleSaveRepoUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingRepoUrl(true);
+    try {
+      const token = sessionToken || sessionStorage.getItem("codexia_session_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`/api/cohorts/${activeCohortId}/repo_url`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ repo_url: editRepoUrlValue.trim() })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const updatedUrl = editRepoUrlValue.trim();
+        setCohortData(data.cohort || { ...cohortData, repo_url: updatedUrl });
+        setAllCohorts(prev => prev.map(c => c.id === activeCohortId ? { ...c, repo_url: updatedUrl } : c));
+        showNotification(`SUCCESS // Updated repository URL for cohort [${activeCohortId}]`);
+        setIsEditingRepoUrl(false);
+      } else {
+        const err = await res.json();
+        showNotification(`ERROR // Failed to update repo URL: ${err.error || "Unknown"}`);
+      }
+    } catch (err: any) {
+      showNotification(`ERROR // Connection error: ${err.message || err}`);
+    } finally {
+      setIsSavingRepoUrl(false);
+    }
+  };
 
   // Dynamic countdown state
   const [timeLeft, setTimeLeft] = useState<{ hours: string, minutes: string, seconds: string } | null>(null);
@@ -279,7 +400,8 @@ export default function StudentDashboard({
     return baseDate;
   };
 
-  const activeSyllabus = activeCohortId === "CODX-2026-07-PREMIUM-01" ? premiumSyllabus : initialSyllabus;
+  const isCohortPremium = cohortData?.track === "premium" || (activeCohortId && activeCohortId.toUpperCase().includes("PREMIUM"));
+  const activeSyllabus = isCohortPremium ? premiumSyllabus : initialSyllabus;
   const syllabusStatus = cohortData?.syllabus_status || {};
 
   // Find active day: "active" day or first "upcoming" day
@@ -424,6 +546,7 @@ export default function StudentDashboard({
   const totalDays = activeSyllabus.length;
   const completedCount = Object.values(completedDays).filter(Boolean).length;
   const progressPercentage = Math.round((completedCount / totalDays) * 100);
+  const isCohortCompleted = cohortData?.status === "completed";
 
   // Handle Google Meet Simulation Camera stream
   useEffect(() => {
@@ -567,45 +690,41 @@ export default function StudentDashboard({
 
   return (
     <div className="font-mono text-xs text-[#A0A2B0]">
-      {/* Admin Viewport Selector */}
-      {isAdmin && (
-        <div className="mb-6 bg-cyan/5 border border-cyan/20 rounded-xl p-4 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div>
-            <span className="text-[8px] font-mono font-bold text-cyan uppercase tracking-widest block mb-0.5">ADMIN SECURE GATEWAY // COHORT SWITCHER</span>
-            <h3 className="font-serif text-xs font-medium text-white uppercase">
-              ACTIVE COHORT WORKSPACE: <span className="text-cyan font-bold font-mono">{activeCohortId === "CODX-2026-07-BASE-01" ? "JULY 2026 BASE COHORT" : "JULY 2026 PREMIUM ALPHA COHORT"}</span>
-            </h3>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setActiveCohortId("CODX-2026-07-BASE-01");
-                showNotification("SWITCHED // Context updated: JULY 2026 BASE COHORT");
-              }}
-              className={`px-3 py-1.5 rounded uppercase font-bold text-[8px] transition-all cursor-pointer border ${
-                activeCohortId === "CODX-2026-07-BASE-01"
-                  ? "bg-cyan text-black border-cyan"
-                  : "bg-black/40 text-slate-400 border-[#2a2c35] hover:text-white"
-              }`}
-            >
-              BASE COHORT
-            </button>
-            <button
-              onClick={() => {
-                setActiveCohortId("CODX-2026-07-PREMIUM-01");
-                showNotification("SWITCHED // Context updated: JULY 2026 PREMIUM ALPHA COHORT");
-              }}
-              className={`px-3 py-1.5 rounded uppercase font-bold text-[8px] transition-all cursor-pointer border ${
-                activeCohortId === "CODX-2026-07-PREMIUM-01"
-                  ? "bg-cyan text-black border-cyan"
-                  : "bg-black/40 text-slate-400 border-[#2a2c35] hover:text-white"
-              }`}
-            >
-              PREMIUM ALPHA
-            </button>
-          </div>
+      {/* Dynamic Cohort Workspace Selector (For Admins and Students) */}
+      <div className="mb-6 bg-[#16171d]/90 border border-[#2a2c35] rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-xl">
+        <div>
+          <span className="text-[8px] font-mono font-bold text-cyan uppercase tracking-widest block mb-0.5">
+            COHORT WORKSPACE SELECTOR // {isAdmin ? "ADMIN CONSOLE" : "STUDENT LEARNING DESK"}
+          </span>
+          <h3 className="font-serif text-xs font-medium text-white uppercase flex items-center gap-2">
+            ACTIVE WORKSPACE: <span className="text-cyan font-bold font-mono">{cohortData?.name || activeCohortId}</span>
+          </h3>
         </div>
-      )}
+
+        {allCohorts.length > 0 && (
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+            <span className="text-[9px] text-slate-400 uppercase font-mono hidden md:inline">Select Cohort:</span>
+            <select
+              value={activeCohortId}
+              onChange={(e) => {
+                const selectedId = e.target.value;
+                setActiveCohortId(selectedId);
+                const found = allCohorts.find((c: any) => c.id === selectedId);
+                if (found) setCohortData(found);
+                showNotification(`SWITCHED // Active workspace set to ${found?.name || selectedId}`);
+              }}
+              className="bg-black/60 border border-cyan/40 text-cyan font-mono text-[11px] font-bold py-1.5 px-3 rounded-lg focus:outline-none focus:border-cyan cursor-pointer uppercase w-full sm:w-auto"
+              id="student-dashboard-cohort-select"
+            >
+              {allCohorts.slice(0, 3).map((c: any) => (
+                <option key={c.id} value={c.id} className="bg-[#111218] text-white">
+                  {c.name} [{c.status?.toUpperCase() || "ACTIVE"}]
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       {/* Header */}
       <header className="mb-8 border-l-4 border-cyan pl-4 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
@@ -623,14 +742,112 @@ export default function StudentDashboard({
           <span className="text-[8px] uppercase tracking-widest bg-purple-500/10 border border-purple-500/20 px-2.5 py-0.5 rounded text-purple-400 font-bold font-mono">
             COHORT: {activeCohortId}
           </span>
-          <span className="text-[8px] uppercase tracking-widest bg-cyan/10 border border-cyan/20 px-2.5 py-0.5 rounded text-cyan font-bold animate-pulse">
-            COHORT ACTIVE
-          </span>
+          <button
+            type="button"
+            onClick={() => isAdmin && handleToggleCohortStatus(cohortData?.status === "completed" ? "active" : "completed")}
+            className={`text-[8px] uppercase tracking-widest border px-2.5 py-0.5 rounded font-bold transition-all ${
+              isAdmin ? "cursor-pointer hover:opacity-80 hover:scale-105" : ""
+            } ${
+              cohortData?.status === "completed" 
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                : cohortData?.status === "archived"
+                ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400"
+                : "bg-cyan/10 border-cyan/20 text-cyan animate-pulse"
+            }`}
+            title={isAdmin ? "Admin: Click to toggle cohort completion status" : ""}
+          >
+            COHORT {cohortData?.status ? cohortData.status.toUpperCase() : "ACTIVE"} {isAdmin ? "⚡" : ""}
+          </button>
           <span className="text-[8px] uppercase tracking-widest bg-white/5 border border-white/10 px-2.5 py-0.5 rounded text-white font-bold">
             TIER: {cohortData?.track === "premium" ? "PREMIUM ALPHA" : "BASE COHORT"}
           </span>
+
+          {/* Close Dashboard Button (X) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onClose) {
+                onClose();
+              } else {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }
+            }}
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 ml-1"
+            title="Close / Exit Dashboard"
+            aria-label="Close"
+            id="student-dashboard-close-btn"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       </header>
+
+      {/* Cohort Status & Certificate Banners (GATED: Only visible/claimable when completed) */}
+      {isCohortCompleted ? (
+        <div className="mb-6 p-5 bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-cyan/15 border border-amber-500/50 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 font-mono shadow-2xl">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 font-bold flex-shrink-0 shadow-lg shadow-amber-500/20">
+              <Award className="w-6 h-6 animate-bounce" />
+            </div>
+            <div>
+              <span className="text-amber-400 font-bold text-xs uppercase tracking-wider flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                OFFICIAL CERTIFICATE OF COMPLETION // UNLOCKED &amp; READY
+              </span>
+              <p className="text-slate-300 text-xs mt-1 leading-relaxed">
+                Congratulations! You have completed all cohort requirements. Generate your official verified Codexia Certificate of Completion. It will be dispatched directly to your registered email address and saved to your profile.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowCertificateModal(true)}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer shrink-0 hover:scale-105 active:scale-95"
+            id="claim-certificate-banner-btn"
+          >
+            <Award className="w-4 h-4" />
+            <span>{myCertificate ? "VIEW / DOWNLOAD CERTIFICATE" : "CLAIM CERTIFICATE NOW"}</span>
+          </button>
+        </div>
+      ) : (
+        <div className="mb-6 p-5 bg-[#12131A]/90 border border-[#2a2c38] rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 font-mono shadow-xl relative overflow-hidden">
+          <div className="flex items-center gap-3.5 relative z-10">
+            <div className="w-11 h-11 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-amber-400/80 font-bold flex-shrink-0 shadow-inner">
+              <Lock className="w-5 h-5 text-amber-400/90" />
+            </div>
+            <div>
+              <span className="text-slate-300 font-bold text-xs uppercase tracking-wider flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-cyan animate-ping shrink-0" />
+                CERTIFICATE OF COMPLETION // LOCKED ({progressPercentage}% IN PROGRESS)
+              </span>
+              <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+                Your certificate will become visible and claimable once all curriculum days in the calendar below are updated to completed, or when your lead instructor marks the cohort as completed.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => showNotification("CERTIFICATE LOCKED // Complete 100% of curriculum days or await cohort completion to claim your certificate.")}
+            className="px-5 py-2.5 rounded-xl bg-[#1a1c24] border border-[#2a2c38] text-slate-400 hover:text-white font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shrink-0 hover:border-amber-500/30"
+            id="locked-certificate-banner-btn"
+          >
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+            <span>LOCKED // IN PROGRESS</span>
+          </button>
+        </div>
+      )}
+
+      {cohortData?.status === "archived" && (
+        <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl flex items-center gap-3 font-mono text-[10px]">
+          <div className="w-8 h-8 rounded-lg bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-yellow-400 font-bold flex-shrink-0">
+            <Lock className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-yellow-400 font-bold uppercase tracking-wider block">COHORT STATUS // ARCHIVED</span>
+            <p className="text-slate-300 mt-0.5 leading-relaxed">
+              This cohort has been archived. All curriculum materials and records are retained for historical reference.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-12 gap-6 max-w-7xl mx-auto">
         
@@ -660,73 +877,93 @@ export default function StudentDashboard({
             </div>
           </div>
 
-          {/* Syllabus day checklist items */}
-          <div className="space-y-3">
-            {activeSyllabus.map((day) => {
-              const status = syllabusStatus[day.id] || "upcoming";
-              const isCompleted = status === "completed";
-              const isActive = status === "active";
-              const isUpcoming = status === "upcoming";
-
-              let cardStyles = "border-[#2a2c35] bg-black/20 hover:bg-black/40";
-              let checkboxStyles = "border-slate-500";
-              let badgeStyles = "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
-              let badgeText = "IN_PROGRESS";
-
-              if (isCompleted) {
-                cardStyles = "border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10";
-                checkboxStyles = "border-emerald-500 bg-emerald-500 text-black";
-                badgeStyles = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-                badgeText = "COMPLETED";
-              } else if (isActive) {
-                cardStyles = "border-cyan bg-cyan/5 hover:bg-cyan/10 shadow-[0_0_15px_rgba(6,182,212,0.15)]";
-                checkboxStyles = "border-cyan";
-                badgeStyles = "bg-cyan/10 text-cyan border-cyan/30 animate-pulse";
-                badgeText = "ACTIVE";
-              } else if (isUpcoming) {
-                cardStyles = "border-slate-800/40 bg-black/5 opacity-40 hover:opacity-60";
-                checkboxStyles = "border-slate-800";
-                badgeStyles = "bg-slate-800/40 text-slate-500 border-slate-800/30";
-                badgeText = "UPCOMING";
-              }
-
-              return (
-                <div 
-                  key={day.id}
-                  onClick={() => isAdmin && handleToggleSyllabusDay(day.id, status)}
-                  className={`p-3 border rounded-lg flex items-center justify-between transition-all ${
-                    isAdmin ? "cursor-pointer hover:border-cyan/50 hover:bg-black/40" : ""
-                  } ${cardStyles}`}
+          {/* Syllabus day checklist items (GATED BY SERVER-SIDE PAYMENT VERIFICATION) */}
+          {!isPaidUser ? (
+            <div className="p-6 bg-[#0D0E12] border border-amber-500/40 rounded-xl text-center space-y-4 my-2 relative overflow-hidden shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto mb-1 shadow-[0_0_20px_rgba(245,158,11,0.15)]">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="font-mono text-xs font-bold uppercase text-amber-400 tracking-widest block">
+                  CURRICULUM MODULES LOCKED // PAYMENT VERIFICATION REQUIRED
+                </span>
+                <p className="font-sans text-xs text-slate-300 max-w-md mx-auto mt-2 leading-relaxed">
+                  Access to live curriculum modules, daily breakdown guides, and class materials is restricted until server-side payment verification is confirmed on your enrollment ledger.
+                </p>
+              </div>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => showNotification("PAYMENT REQUIRED // Please complete seat enrollment on the sign in page or checkout modal.")}
+                  className="px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-amber-500/30 transition-all cursor-pointer inline-flex items-center gap-2"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-all ${checkboxStyles}`}>
-                      {isCompleted && <CheckCircle className="w-3.5 h-3.5 text-black" />}
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`text-[8px] font-bold block ${isUpcoming ? "text-slate-500" : "text-cyan"}`}>
-                          DAY {day.dayNumber}
-                        </span>
-                        {day.durationHours && (
-                          <span className="text-[7.5px] text-slate-400 font-mono">({day.durationHours} HOURS)</span>
-                        )}
-                        {day.timing && (
-                          <span className="text-[7.5px] text-slate-500 font-mono">// {day.timing}</span>
-                        )}
-                      </div>
-                      <span className={`text-[10px] font-bold uppercase block leading-tight mt-0.5 ${isUpcoming ? "text-slate-500" : "text-white"}`}>
-                        {day.title}
-                      </span>
-                    </div>
-                  </div>
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>COMPLETE ENROLLMENT PAYMENT TO UNLOCK</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {activeSyllabus.map((day) => {
+                const status = syllabusStatus[day.id] || "upcoming";
+                const isCompleted = status === "completed";
+                const isActive = status === "active";
+                const isUpcoming = status === "upcoming";
 
-                  <span className={`text-[8px] font-bold uppercase tracking-widest px-2 py-0.5 border rounded ${badgeStyles}`}>
-                    {badgeText}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+                let cardStyles = "border-[#2a2c35] bg-black/20 hover:bg-black/40";
+                let checkboxStyles = "border-slate-500";
+                let badgeStyles = "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
+                let badgeText = "IN_PROGRESS";
+
+                if (isCompleted) {
+                  cardStyles = "border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10";
+                  checkboxStyles = "border-emerald-500 bg-emerald-500 text-black";
+                  badgeStyles = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                  badgeText = "COMPLETED";
+                } else if (isActive) {
+                  cardStyles = "border-cyan bg-cyan/5 hover:bg-cyan/10 shadow-[0_0_15px_rgba(6,182,212,0.15)]";
+                  checkboxStyles = "border-cyan";
+                  badgeStyles = "bg-cyan/10 text-cyan border-cyan/30 animate-pulse";
+                  badgeText = "ACTIVE";
+                } else if (isUpcoming) {
+                  cardStyles = "border-slate-800/40 bg-black/5 opacity-40 hover:opacity-60";
+                  checkboxStyles = "border-slate-800";
+                  badgeStyles = "bg-slate-800/40 text-slate-500 border-slate-800/30";
+                  badgeText = "UPCOMING";
+                }
+
+                return (
+                  <div 
+                    key={day.id}
+                    onClick={() => isAdmin && handleToggleSyllabusDay(day.id, status)}
+                    className={`p-3 border rounded-lg flex items-center justify-between transition-all ${
+                      isAdmin ? "cursor-pointer hover:border-cyan/50 hover:bg-black/40" : ""
+                    } ${cardStyles}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-all ${checkboxStyles}`}>
+                        {isCompleted && <CheckCircle className="w-3.5 h-3.5 text-black" />}
+                      </div>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className={`text-[8px] font-bold block ${isUpcoming ? "text-slate-500" : "text-cyan"}`}>
+                            DAY {day.dayNumber}
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase block leading-tight mt-0.5 ${isUpcoming ? "text-slate-500" : "text-white"}`}>
+                          {day.title}
+                        </span>
+                      </div>
+                    </div>
+
+                    <span className={`text-[8px] font-bold uppercase tracking-widest px-2 py-0.5 border rounded ${badgeStyles}`}>
+                      {badgeText}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Resources & Classroom session info */}
@@ -742,35 +979,14 @@ export default function StudentDashboard({
               <span className={`w-2 h-2 rounded-full ${cohortData?.live_meet_url ? "bg-cyan animate-pulse" : "bg-slate-700"}`} />
             </div>
 
-            {timeLeft ? (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <div className="text-[8px] text-slate-400 uppercase">ACTIVE LESSON TOPIC:</div>
-                  <div className="text-[10px] font-bold text-white uppercase leading-tight">
-                    {activeDay ? activeDay.title : "GRADUATED // COHORT COMPLETE!"}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="p-2 bg-[#16171D] border border-[#2a2c35] rounded">
-                    <div className="font-bold text-white text-sm font-mono">{timeLeft.hours}</div>
-                    <div className="text-[7px] text-slate-400 uppercase font-mono">HOURS</div>
-                  </div>
-                  <div className="p-2 bg-[#16171D] border border-[#2a2c35] rounded">
-                    <div className="font-bold text-white text-sm font-mono">{timeLeft.minutes}</div>
-                    <div className="text-[7px] text-slate-400 uppercase font-mono">MINUTES</div>
-                  </div>
-                  <div className="p-2 bg-[#16171D] border border-[#2a2c35] rounded">
-                    <div className="font-bold text-white text-sm font-mono">{timeLeft.seconds}</div>
-                    <div className="text-[7px] text-slate-400 uppercase font-mono">SECONDS</div>
-                  </div>
+            <div className="space-y-3">
+              <div className="space-y-1 bg-[#16171D]/60 p-3 rounded-lg border border-[#2a2c35]/60">
+                <div className="text-[8px] text-slate-400 uppercase font-mono tracking-wider">ACTIVE LESSON TOPIC:</div>
+                <div className="text-[11px] font-bold text-white uppercase leading-snug font-mono tracking-wide">
+                  {activeDay ? activeDay.title : "CONNECTING YOUR BOT TO REAL TOOLS"}
                 </div>
               </div>
-            ) : (
-              <div className="text-[8.5px] text-slate-500 uppercase font-mono text-center py-2">
-                NO SCHEDULING INFORMATION DETECTED
-              </div>
-            )}
+            </div>
 
             {cohortData?.live_meet_url ? (
               <div className="space-y-2">
@@ -868,20 +1084,113 @@ export default function StudentDashboard({
 
             <div className="space-y-2 text-[9px] uppercase font-bold text-white">
               {/* 1. Github Repositories */}
-              <a 
-                href={cohortData?.repo_url || "https://github.com/codexia-academy"} 
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => showNotification("Navigating to dynamic GitHub repository...")}
-                className="p-2.5 bg-black/40 border border-[#2a2c35] hover:border-cyan rounded flex items-center justify-between group transition-all"
-                id="github-repo-link"
-              >
-                <span className="flex items-center gap-2">
-                  <Github className="w-3.5 h-3.5 text-cyan" />
-                  GITHUB REPOSITORIES
-                </span>
-                <ExternalLink className="w-3 h-3 text-slate-500 group-hover:text-cyan transition-colors" />
-              </a>
+              {isEditingRepoUrl ? (
+                <div className="p-3 bg-black/80 border border-cyan/60 rounded space-y-2 font-mono">
+                  <div className="flex items-center justify-between text-[8px] text-cyan font-bold">
+                    <span>EDIT REPOSITORY LINK [{activeCohortId}]</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setIsEditingRepoUrl(false)} 
+                      className="text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <form onSubmit={handleSaveRepoUrl} className="flex gap-2">
+                    <input
+                      type="url"
+                      value={editRepoUrlValue}
+                      onChange={(e) => setEditRepoUrlValue(e.target.value)}
+                      placeholder="https://github.com/org/cohort-repo"
+                      className="flex-1 bg-black border border-[#2a2c35] focus:border-cyan text-white px-2 py-1 rounded text-[9px] font-mono normal-case outline-none"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSavingRepoUrl}
+                      className="px-2.5 py-1 bg-cyan text-black font-extrabold text-[8px] rounded hover:opacity-90 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <Check className="w-3 h-3" />
+                      {isSavingRepoUrl ? "SAVING..." : "SAVE"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingRepoUrl(false)}
+                      className="px-2 py-1 bg-white/10 text-white font-bold text-[8px] rounded hover:bg-white/20 transition-all cursor-pointer"
+                    >
+                      CANCEL
+                    </button>
+                  </form>
+                </div>
+              ) : cohortData?.repo_url && cohortData.repo_url.trim() !== "" ? (
+                <div className="p-2.5 bg-black/40 border border-[#2a2c35] hover:border-cyan rounded flex items-center justify-between group transition-all">
+                  <a 
+                    href={cohortData.repo_url} 
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => showNotification("Navigating to cohort GitHub repository...")}
+                    className="flex items-center gap-2 flex-1 min-w-0"
+                    id="github-repo-link"
+                  >
+                    <Github className="w-3.5 h-3.5 text-cyan shrink-0" />
+                    <span className="truncate">GITHUB REPOSITORIES</span>
+                  </a>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditRepoUrlValue(cohortData.repo_url || "");
+                          setIsEditingRepoUrl(true);
+                        }}
+                        className="p-1 hover:bg-cyan/20 text-slate-400 hover:text-cyan rounded transition-colors cursor-pointer"
+                        title="Edit repository URL for this cohort"
+                        id="edit-github-repo-btn"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                    <a 
+                      href={cohortData.repo_url} 
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-slate-500 group-hover:text-cyan transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-black/40 border border-[#2a2c35] rounded flex items-center justify-between transition-all">
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Github className="w-3.5 h-3.5 text-slate-500" />
+                    <span>GITHUB REPOSITORIES</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-white/5 border border-white/10 text-slate-400 px-2 py-0.5 rounded text-[7.5px] font-mono normal-case font-medium">
+                      No repository linked yet
+                    </span>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditRepoUrlValue("");
+                          setIsEditingRepoUrl(true);
+                        }}
+                        className="p-1 hover:bg-cyan/20 text-slate-400 hover:text-cyan rounded transition-colors cursor-pointer"
+                        title="Add repository URL for this cohort"
+                        id="add-github-repo-btn"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 2. Cohort Documents (opens dedicated full-page) */}
               <button 
@@ -1232,6 +1541,29 @@ export default function StudentDashboard({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Interactive Certificate Generator & Dispatch Modal (ONLY rendered when cohort status is specifically 'completed') */}
+      {isCohortCompleted && (
+        <CertificateModal
+          isOpen={showCertificateModal}
+          onClose={() => setShowCertificateModal(false)}
+          sessionToken={sessionToken}
+          userEmail={currentUserEmail || undefined}
+          defaultStudentName={cohortData?.certificate_name || (myCertificate ? myCertificate.studentName : undefined)}
+          cohortId={activeCohortId}
+          track={cohortData?.track || userTrack || "base"}
+          showNotification={showNotification}
+          onCertificateGenerated={(cert) => {
+            setMyCertificate({
+              studentName: cert.student_name,
+              program: cert.program,
+              cohortId: cert.cohort_id,
+              completionDate: cert.completion_date,
+              certificateId: cert.certificate_id
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -39,7 +39,7 @@ export const GRIEVANCE_OFFICER_DETAILS: GrievanceOfficerDetails = {
   name: "Vankayalapati Mallikharjuna Rao",
   email: "support.codexiaindia@gmail.com",
   phone: "7760593646",
-  address: "Mohammed Ilyas Building, Site No 34, Behind Lady Vailankani School, Varthur, Bengaluru South, Bengaluru, Karnataka - 560087, India",
+  address: "",
   operatingEntity: "Vankayalapati Mallikharjuna Rao (trading as Codexia)",
   domain: "codexia.academy"
 };
@@ -109,7 +109,7 @@ export const LEGAL_DOCUMENTS: Record<string, LegalDocument> = {
       {
         id: "terms-intro",
         title: "1. Introduction and Acceptance",
-        content: `This website ("Website") and the training and consulting services offered on it (together, the "Services") are operated by Vankayalapati Mallikharjuna Rao, trading as Codexia ("Codexia", "we", "us", or "our"), with a registered address at Mohammed Ilyas Building, Site No 34, Behind Lady Vailankani School, Varthur, Bengaluru South, Bengaluru, Karnataka - 560087, India.
+        content: `This website ("Website") and the training and consulting services offered on it (together, the "Services") are operated by Vankayalapati Mallikharjuna Rao, trading as Codexia ("Codexia", "we", "us", or "our").
 
 By accessing the Website, registering for a program, or otherwise using the Services, you agree to be bound by these Terms and Conditions and by our Privacy Policy and Refund and Cancellation Policy, each of which forms part of this agreement. If you do not agree, please do not use the Website or the Services.`
       },
@@ -205,8 +205,7 @@ Any specific bot, workflow, or system you personally build during a program usin
         bulletPoints: [
           "Grievance Officer: Vankayalapati Mallikharjuna Rao",
           "Email: support.codexiaindia@gmail.com",
-          "Phone: 7760593646",
-          "Address: Mohammed Ilyas Building, Site No 34, Behind Lady Vailankani School, Varthur, Bengaluru South, Bengaluru, Karnataka - 560087, India"
+          "Phone: 7760593646"
         ]
       }
     ]
@@ -289,8 +288,7 @@ Any specific bot, workflow, or system you personally build during a program usin
         bulletPoints: [
           "Grievance Officer: Vankayalapati Mallikharjuna Rao",
           "Email: support.codexiaindia@gmail.com",
-          "Phone: 7760593646",
-          "Address: Mohammed Ilyas Building, Site No 34, Behind Lady Vailankani School, Varthur, Bengaluru South, Bengaluru, Karnataka - 560087, India"
+          "Phone: 7760593646"
         ]
       }
     ]
@@ -407,8 +405,7 @@ Any specific bot, workflow, or system you personally build during a program usin
         title: "9. Contact",
         content: `Vankayalapati Mallikharjuna Rao
 Email: support.codexiaindia@gmail.com
-Phone: 7760593646
-Address: Mohammed Ilyas Building, Site No 34, Behind Lady Vailankani School, Varthur, Bengaluru South, Bengaluru, Karnataka - 560087, India`
+Phone: 7760593646`
       }
     ]
   }

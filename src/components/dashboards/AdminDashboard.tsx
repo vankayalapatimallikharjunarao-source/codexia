@@ -25,7 +25,8 @@ import {
   Star,
   Video,
   ExternalLink,
-  Calendar
+  Calendar,
+  Phone
 } from "lucide-react";
 import { WebinarMetrics, FinancialMetrics, ComplaintLog, StudentFeedback, Cohort } from "../../types";
 import { googleSignIn, createMeetSpace, auth } from "../../lib/googleMeet";
@@ -105,6 +106,8 @@ interface WaitlistedStudent {
 interface EnrolledStudent {
   email: string;
   username: string;
+  name?: string;
+  phone?: string;
   trackId: string;
   timestamp: string;
   tier: "standard" | "premium";
@@ -370,7 +373,7 @@ export default function AdminDashboard({
   const [adminDirectiveMessage, setAdminDirectiveMessage] = useState("");
 
   // Telemetry Filtering Mode
-  const [logFilter, setLogFilter] = useState<"ALL" | "SECURITY" | "STUDENT" | "WAITLIST">("ALL");
+  const [logFilter, setLogFilter] = useState<"ALL" | "SECURITY" | "STUDENT">("ALL");
   const [logSearchQuery, setLogSearchQuery] = useState("");
 
   // Admin Operating Sub-tab state
@@ -382,7 +385,7 @@ export default function AdminDashboard({
   const [twoFactorSentCode, setTwoFactorSentCode] = useState("");
 
   // Registration Alerts Feed State
-  const [alertFeedFilter, setAlertFeedFilter] = useState<"ALL" | "ENROLLMENT" | "WAITLIST">("ALL");
+  const [alertFeedFilter, setAlertFeedFilter] = useState<"ALL" | "ENROLLMENT">("ALL");
   const [alertSearchQuery, setAlertSearchQuery] = useState("");
 
   // Keep state sync with Server instead of localStorage
@@ -808,47 +811,32 @@ export default function AdminDashboard({
       timestampVal: new Date(r.timestamp).getTime() || Date.now()
     }));
     
-    let waitlists = waitlistStudents.map(w => ({
-      ...w,
-      cohort_id: w.cohort_id || "CODX-2026-07-BASE-01",
-      type: "WAITLIST" as const,
-      status: "PENDING_APPROVAL" as const,
-      timestampVal: Date.now() - 3600000 // default offset
-    }));
-    
     if (selectedCohortId !== "ALL") {
       enrollments = enrollments.filter(e => e.cohort_id === selectedCohortId);
-      waitlists = waitlists.filter(w => w.cohort_id === selectedCohortId);
     }
     
-    const combined = [...enrollments, ...waitlists];
     // Sort chronologically (newest first)
-    combined.sort((a, b) => b.timestampVal - a.timestampVal);
+    enrollments.sort((a, b) => b.timestampVal - a.timestampVal);
     
-    return combined;
+    return enrollments;
   };
 
   // Filter and search combined registration alerts
   const getFilteredAlerts = () => {
     const alerts = getRegistrationAlerts();
     let filtered = alerts;
-    if (alertFeedFilter === "ENROLLMENT") {
-      filtered = alerts.filter(a => a.type === "ENROLLMENT");
-    } else if (alertFeedFilter === "WAITLIST") {
-      filtered = alerts.filter(a => a.type === "WAITLIST");
-    }
 
     if (alertSearchQuery.trim()) {
       const q = alertSearchQuery.toLowerCase();
       filtered = filtered.filter(a => 
-        a.username.toLowerCase().includes(q) || 
-        a.email.toLowerCase().includes(q)
+        (a.username && a.username.toLowerCase().includes(q)) || 
+        (a.email && a.email.toLowerCase().includes(q)) ||
+        (a.name && a.name.toLowerCase().includes(q)) ||
+        (a.phone && a.phone.includes(q))
       );
     }
     return filtered;
   };
-
-
 
   // Filter logs list based on categories & search query
   const getFilteredLogs = () => {
@@ -857,8 +845,6 @@ export default function AdminDashboard({
       filtered = complaintLogs.filter(l => l.id.startsWith("SEC"));
     } else if (logFilter === "STUDENT") {
       filtered = complaintLogs.filter(l => l.issueDescription.includes("STUDENT") || l.id.startsWith("PAY") || l.issueDescription.includes("DIRECT") || l.issueDescription.includes("FEEDBACK"));
-    } else if (logFilter === "WAITLIST") {
-      filtered = complaintLogs.filter(l => l.issueDescription.includes("WAITLIST") || l.issueDescription.includes("SEAT"));
     }
 
     if (logSearchQuery.trim()) {
@@ -1203,136 +1189,28 @@ export default function AdminDashboard({
         /* Bento Grid Layer */
         <div className="grid grid-cols-12 gap-6 max-w-7xl mx-auto">
         
-        {/* GOOGLE MEET GATEWAY PANEL (6 cols) */}
-        <section className="col-span-12 lg:col-span-6 bg-[#16171D]/40 border border-[#2a2c35] p-5 rounded-xl flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-start border-b border-[#2a2c35]/60 pb-3">
-              <h3 className="text-[10px] font-bold uppercase text-[#A0A2B0] flex items-center gap-2 tracking-widest">
-                <Video className="w-4 h-4 text-cyan" />
-                GOOGLE MEET INTEGRATION GATEWAY
-              </h3>
-              <span className="text-[9px] text-cyan bg-cyan/10 px-2.5 py-0.5 border border-cyan/20 animate-pulse uppercase tracking-widest font-bold">
-                ADMIN FALLBACK CONTROL
-              </span>
-            </div>
-
-            {/* Live Google Meet Panel Integration */}
-            <div className="mt-4 p-4 bg-cyan/5 border border-cyan/20 rounded-lg space-y-3">
-              <div className="flex justify-between items-center pb-2 border-b border-cyan/10">
-                <span className="text-[9px] font-bold text-cyan uppercase tracking-widest flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse"></span>
-                  GOOGLE MEET LIVE ROOM
-                </span>
-                <span className="text-[7px] text-slate-400 font-bold uppercase tracking-wider">
-                  Admin Control Panel
-                </span>
-              </div>
-
-              {realMeetUrl ? (
-                <div className="space-y-2">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between text-[9px] font-mono gap-1">
-                    <span className="text-[#A0A2B0]">CURRENT SPACE URI:</span>
-                    <a 
-                      href={realMeetUrl} 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="text-cyan font-bold hover:underline break-all"
-                    >
-                      {realMeetUrl} ↗
-                    </a>
-                  </div>
-                  <div className="flex gap-2">
-                    <a 
-                      href={realMeetUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex-grow py-2 bg-cyan text-black font-bold text-center uppercase tracking-wider text-[9px] rounded hover:opacity-90 transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      ENTER MEETING ROOM
-                    </a>
-                    <button
-                      type="button"
-                      onClick={handleGenerateMeet}
-                      disabled={isGeneratingMeet}
-                      className="px-3 py-2 bg-white/5 border border-white/10 hover:bg-[#E58A3C]/10 hover:text-[#E58A3C] text-slate-300 font-bold uppercase tracking-wider text-[9px] rounded transition-all cursor-pointer"
-                    >
-                      {isGeneratingMeet ? "PROVISIONING..." : "RECREATE SPACE"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-2 space-y-2">
-                  <p className="text-[9px] text-slate-400 uppercase">
-                    No active Google Meet has been generated for the students yet.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleGenerateMeet}
-                    disabled={isGeneratingMeet}
-                    className="w-full py-2 bg-cyan text-black font-bold uppercase tracking-widest text-[9px] rounded hover:opacity-90 transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    {isGeneratingMeet ? (
-                      <span className="animate-spin">⚡</span>
-                    ) : (
-                      <Video className="w-3.5 h-3.5" />
-                    )}
-                    GENERATE REAL GOOGLE MEET SPACE FOR COHORT
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        {/* INTERACTIVE WAITLIST & SEAT ALLOCATION PORT (6 cols) */}
-        <section className="col-span-12 lg:col-span-6 bg-[#16171D]/40 border border-[#2a2c35] p-5 rounded-xl flex flex-col justify-between space-y-4">
+        {/* COHORT ADMISSION & SEAT APPROVALS (8 cols) */}
+        <section className="col-span-12 lg:col-span-8 bg-[#16171D]/40 border border-[#2a2c35] p-5 rounded-xl flex flex-col justify-between space-y-4">
           <div>
             <div className="flex justify-between items-start border-b border-[#2a2c35]/60 pb-3">
               <h3 className="text-[10px] font-bold uppercase text-[#A0A2B0] flex items-center gap-2 tracking-widest">
                 <Users className="w-4 h-4 text-cyan" />
                 COHORT ADMISSION &amp; SEAT APPROVALS
               </h3>
-              <span className="text-[8px] font-bold text-red-400 uppercase tracking-wider animate-pulse flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-                {waitlistStudents.length} WAITLIST QUEUED
+              <span className="text-[8px] font-bold text-cyan uppercase tracking-wider flex items-center gap-1 bg-cyan/10 px-2.5 py-1 border border-cyan/20 rounded">
+                <Check className="w-3 h-3 text-cyan" /> AUTO-PROVISIONING ACTIVE
               </span>
             </div>
 
-            {/* Waitlist Rows */}
-            <div className="mt-4 space-y-2 max-h-48 overflow-y-auto pr-1">
-              {waitlistStudents.length === 0 ? (
-                <div className="p-4 text-center bg-black/20 border border-[#2a2c35]/50 rounded-lg text-slate-500 uppercase font-bold text-[9px]">
-                  ALL WAITLIST SEATS ASSIGNED // NO QUEUED APPLICANTS
-                </div>
-              ) : (
-                waitlistStudents.map((s) => (
-                  <div key={s.email} className="p-2 bg-[#0d0e14]/60 border border-[#2a2c35] rounded flex items-center justify-between text-[9px]">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-tight">{s.username}</div>
-                      <div className="text-[8px] text-slate-500 uppercase tracking-wider leading-none mt-1">
-                        {s.email} • {s.tier.toUpperCase()} TRACK • {s.timestamp}
-                      </div>
-                    </div>
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={() => handleApproveWaitlist(s)}
-                        className="p-1 px-2.5 bg-cyan text-black font-bold uppercase text-[8px] tracking-widest rounded hover:opacity-90 cursor-pointer flex items-center gap-1"
-                        title="Approve to Cohort Seat"
-                      >
-                        <Check className="w-3 h-3" /> APPROVE
-                      </button>
-                      <button
-                        onClick={() => handleDeclineWaitlist(s.email)}
-                        className="p-1 px-2.5 bg-red-950/40 border border-red-500/20 text-red-400 font-bold uppercase text-[8px] tracking-widest rounded hover:bg-red-500 hover:text-black cursor-pointer"
-                        title="Reject Seat Application"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
+            {/* PayU Auto-Admission Explanation Box */}
+            <div className="mt-4 p-4 bg-cyan/5 border border-cyan/20 rounded-lg space-y-2 font-mono text-[9px]">
+              <div className="flex items-center gap-2 text-cyan font-bold uppercase tracking-widest">
+                <Sparkles className="w-3.5 h-3.5" />
+                AUTOMATED PAYU STUDENT PROVISIONING
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                Upon confirmed PayU payment callback/webhook, student accounts are automatically created, activated, and bound to whichever cohort is currently marked <strong className="text-cyan">Enrolling</strong> for their purchased track. No manual admin intervention is required for standard signups.
+              </p>
             </div>
 
             {/* Direct Admin Seat Assignment Form */}
@@ -1372,109 +1250,6 @@ export default function AdminDashboard({
             </div>
 
           </div>
-        </section>
-
-        {/* Financial Revenue Engine (8 cols) */}
-        <section className="col-span-12 lg:col-span-8 bg-[#16171D]/40 border border-[#2a2c35] p-6 flex flex-col rounded-xl">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-[#2a2c35]/60 pb-3">
-            <h3 className="text-[10px] font-bold uppercase text-[#A0A2B0] flex items-center gap-2 tracking-widest">
-              <DollarSign className="w-4 h-4 text-cyan" />
-              Financial Revenue Engine
-            </h3>
-            <div className="flex items-center gap-1 bg-black p-1 border border-[#2a2c35] rounded-lg">
-              <button className="px-3 py-1 text-[9px] uppercase text-black bg-cyan font-bold tracking-wider rounded">
-                Daily Interval
-              </button>
-              <button 
-                onClick={() => showNotification("Monthly intervals are compiled in production pipeline logs.")}
-                className="px-3 py-1 text-[9px] uppercase text-[#A0A2B0] hover:text-white tracking-wider cursor-pointer"
-              >
-                Monthly Log
-              </button>
-            </div>
-          </div>
-
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-            <div className="border-l-2 border-[#2a2c35] px-4 py-1">
-              <div className="text-[9px] text-[#A0A2B0] uppercase tracking-wider">
-                Gross Volume (USD)
-              </div>
-              <div className="text-lg font-bold text-white tracking-wide">
-                ${financialMetrics.totalGrossUSD.toLocaleString()}
-              </div>
-            </div>
-            <div className="border-l-2 border-[#2a2c35] px-4 py-1">
-              <div className="text-[9px] text-[#A0A2B0] uppercase tracking-wider">
-                Gross Volume (INR)
-              </div>
-              <div className="text-lg font-bold text-cyan tracking-wide">
-                ₹{(financialMetrics.totalGrossINR / 10000000).toFixed(2)} Cr
-              </div>
-            </div>
-            <div className="border-l-2 border-[#2a2c35] px-4 py-1">
-              <div className="text-[9px] text-[#A0A2B0] uppercase tracking-wider">
-                Average Ticket Size
-              </div>
-              <div className="text-lg font-bold text-white tracking-wide">
-                ${financialMetrics.avgOrderValueUSD}.00
-              </div>
-            </div>
-          </div>
-
-          {/* Visual Bar Chart representation */}
-          {financialMetrics.totalGrossUSD === 0 ? (
-            <div className="flex-grow flex flex-col items-center justify-center h-52 border border-[#2a2c35]/40 text-[#A0A2B0] text-[9px] font-mono uppercase tracking-widest bg-black/20 rounded-lg p-4">
-              <span className="text-cyan">No completed transactions registered</span>
-              <span className="text-[8px] text-slate-500 mt-1">Live metrics populate automatically upon enrollment</span>
-            </div>
-          ) : (
-            <>
-              <div className="flex-grow flex items-end justify-between gap-1.5 sm:gap-3 h-52 border-b border-[#2a2c35] relative px-2 pb-1">
-                {/* Background indicators */}
-                <div className="absolute left-0 top-0 h-full w-full flex flex-col justify-between pointer-events-none opacity-5">
-                  <div className="border-t border-[#2a2c35] w-full"></div>
-                  <div className="border-t border-[#2a2c35] w-full"></div>
-                  <div className="border-t border-[#2a2c35] w-full"></div>
-                  <div className="border-t border-[#2a2c35] w-full"></div>
-                </div>
-
-                {/* Generate Bars dynamically */}
-                {financialMetrics.chartData.map((bar, i) => {
-                  const maxAmount = Math.max(...financialMetrics.chartData.map(b => b.amount)) || 1000;
-                  const barHeight = Math.max(8, Math.min(95, (bar.amount / maxAmount) * 100));
-                  return (
-                    <div 
-                      key={i} 
-                      className="flex-grow flex flex-col justify-end group cursor-pointer relative"
-                      style={{ height: "100%" }}
-                    >
-                      {/* Tooltip */}
-                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-cyan text-black text-[9px] font-bold px-1.5 py-0.5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 uppercase tracking-tighter rounded">
-                        ${bar.amount.toLocaleString()}
-                      </div>
-
-                      <div 
-                        className={`w-full transition-all duration-300 rounded-t-sm ${
-                          bar.isHighlighted 
-                            ? "bg-cyan/80 group-hover:bg-cyan" 
-                            : "bg-[#1C1E26] border border-[#2a2c35] group-hover:bg-cyan/40 group-hover:border-cyan"
-                        }`}
-                        style={{ height: `${barHeight}%` }}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Days labels */}
-              <div className="flex justify-between mt-3 text-[9px] text-[#A0A2B0] uppercase px-2 tracking-widest">
-                {financialMetrics.chartData.map((bar, i) => (
-                  <span key={i}>{bar.day[0]}</span>
-                ))}
-              </div>
-            </>
-          )}
         </section>
 
         {/* COHORT REGISTRATION SUMMARY (4 cols) */}
@@ -1518,8 +1293,13 @@ export default function AdminDashboard({
                     recentlyRegistered.map((student, idx) => (
                       <div key={idx} className="flex items-center justify-between text-[9px] border-b border-[#2a2c35]/40 pb-1.5 last:border-0 last:pb-0">
                         <div>
-                          <span className="text-white font-bold">{student.username}</span>
-                          <span className="text-[7px] text-slate-500 block">{student.email}</span>
+                          <span className="text-white font-bold">{student.name || student.username}</span>
+                          <div className="text-[7px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                            <span>{student.email}</span>
+                            {student.phone && (
+                              <span className="text-cyan font-mono">📱 {student.phone}</span>
+                            )}
+                          </div>
                         </div>
                         <span className="text-cyan text-[8px] font-bold uppercase">{student.tier}</span>
                       </div>
@@ -1972,7 +1752,7 @@ export default function AdminDashboard({
                   className="bg-black/60 border border-[#2a2c35] text-[9px] text-cyan px-3 py-1.5 rounded-lg focus:outline-none focus:border-cyan font-mono uppercase cursor-pointer"
                 >
                   <option value="ALL">ALL COHORTS</option>
-                  {cohortsList.map(cohort => (
+                  {cohortsList.slice(0, 3).map(cohort => (
                     <option key={cohort.id} value={cohort.id}>
                       {cohort.name || cohort.id} ({cohort.status.toUpperCase()})
                     </option>
@@ -1982,36 +1762,31 @@ export default function AdminDashboard({
             </div>
 
             {/* Live Stats Header Bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div className="p-3.5 bg-black/40 border border-[#2a2c35] rounded-lg">
-                <span className="text-[8px] text-slate-500 uppercase block mb-0.5">CURRENT COHORT CAPACITY:</span>
-                <span className="font-mono text-base font-bold text-white block">
-                  {webinarMetrics.activeRegistrations.toLocaleString()} / 3,674 SEATS
-                </span>
-                <div className="w-full bg-black h-1 mt-2.5 border border-[#2a2c35]/40 rounded-full overflow-hidden">
-                  <div className="bg-cyan h-full transition-all duration-1000" style={{ width: `${webinarMetrics.capacityPercentage}%` }} />
-                </div>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              {(() => {
+                const currentCohort = cohortsList.find(c => c.id === selectedCohortId);
+                const enrolledForCohort = selectedCohortId === "ALL" 
+                  ? recentlyRegistered.length 
+                  : recentlyRegistered.filter(r => r.cohort_id === selectedCohortId).length;
+                const capacityTotal = selectedCohortId === "ALL"
+                  ? cohortsList.reduce((acc, c) => acc + (c.capacity || (c.track === "premium" ? 35 : 150)), 0) || 185
+                  : (currentCohort?.capacity || (currentCohort?.track === "premium" ? 35 : 150));
+                const fillPct = Math.min(100, Math.round((enrolledForCohort / capacityTotal) * 100)) || 0;
 
-              <div className="p-3.5 bg-black/40 border border-[#2a2c35] rounded-lg">
-                <span className="text-[8px] text-slate-500 uppercase block mb-0.5">PENDING WAITLIST APPLICATIONS:</span>
-                <span className="font-mono text-base font-bold text-cyan block">
-                  {waitlistStudents.length} STUDENT RECORDS
-                </span>
-                <span className="text-[7.5px] text-cyan/70 uppercase block mt-2.5">
-                  WAITING OPERATOR CONVERSION COMMANDS
-                </span>
-              </div>
-
-              <div className="p-3.5 bg-black/40 border border-[#2a2c35] rounded-lg">
-                <span className="text-[8px] text-slate-500 uppercase block mb-0.5">TOTAL GROSS REVENUE DIRECT:</span>
-                <span className="font-mono text-base font-bold text-green-400 block">
-                  ₹{(financialMetrics.totalGrossINR / 10000000).toFixed(4)} Cr
-                </span>
-                <span className="text-[7.5px] text-slate-400 uppercase block mt-2.5">
-                  (${financialMetrics.totalGrossUSD.toLocaleString()} USD NET INTEGRATION)
-                </span>
-              </div>
+                return (
+                  <div className="p-3.5 bg-black/40 border border-[#2a2c35] rounded-lg">
+                    <span className="text-[8px] text-slate-500 uppercase block mb-0.5">
+                      CURRENT COHORT CAPACITY ({selectedCohortId === "ALL" ? "ALL ACTIVE" : currentCohort?.name || selectedCohortId}):
+                    </span>
+                    <span className="font-mono text-base font-bold text-white block">
+                      {enrolledForCohort.toLocaleString()} / {capacityTotal.toLocaleString()} SEATS ({fillPct}%)
+                    </span>
+                    <div className="w-full bg-black h-1.5 mt-2.5 border border-[#2a2c35]/40 rounded-full overflow-hidden">
+                      <div className="bg-cyan h-full transition-all duration-1000" style={{ width: `${fillPct}%` }} />
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Filter controls */}
@@ -2019,7 +1794,7 @@ export default function AdminDashboard({
               <div className="flex items-center gap-2">
                 <span className="text-[9px] uppercase text-slate-500">Filter Feed:</span>
                 <div className="flex gap-1 bg-[#16171D] p-1 border border-[#2a2c35] rounded-lg">
-                  {["ALL", "ENROLLMENT", "WAITLIST"].map((type) => (
+                  {["ALL", "ENROLLMENT"].map((type) => (
                     <button
                       key={type}
                       onClick={() => setAlertFeedFilter(type as any)}
@@ -2029,7 +1804,7 @@ export default function AdminDashboard({
                           : "text-slate-400 hover:text-white"
                       }`}
                     >
-                      {type === "ALL" ? "ALL ALERTS" : type === "ENROLLMENT" ? "ENROLLED SEATS" : "WAITLIST SEATS"}
+                      {type === "ALL" ? "ALL ALERTS" : "ENROLLED SEATS"}
                     </button>
                   ))}
                 </div>
@@ -2060,36 +1835,36 @@ export default function AdminDashboard({
                 </div>
               ) : (
                 getFilteredAlerts().map((alert, idx) => {
-                  const isEnroll = alert.type === "ENROLLMENT";
                   const trackName = webinarTracks.find(t => t.id === alert.trackId)?.name || alert.trackId;
                   
                   return (
                     <div 
-                      key={alert.email + alert.type + idx}
-                      className={`p-4 border rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 transition-all ${
-                        isEnroll 
-                          ? "bg-[#101c18]/30 border-green-500/20 hover:border-green-500/40" 
-                          : "bg-[#1c1810]/30 border-yellow-500/20 hover:border-yellow-500/40"
-                      }`}
+                      key={alert.email + idx}
+                      className="p-4 border rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 transition-all bg-[#101c18]/30 border-green-500/20 hover:border-green-500/40"
                     >
                       <div className="flex items-start gap-3.5">
-                        <div className={`w-9 h-9 rounded-lg border flex items-center justify-center flex-shrink-0 ${
-                          isEnroll 
-                            ? "bg-green-500/10 border-green-500/30 text-green-400" 
-                            : "bg-yellow-500/10 border-yellow-500/30 text-yellow-400"
-                        }`}>
-                          {isEnroll ? <UserCheck className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                        <div className="w-9 h-9 rounded-lg border flex items-center justify-center flex-shrink-0 bg-green-500/10 border-green-500/30 text-green-400">
+                          <UserCheck className="w-5 h-5" />
                         </div>
 
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[10px] font-bold text-white uppercase tracking-tight">
-                              {alert.username}
+                              {alert.name || alert.username}
                             </span>
                             <span className="text-[8px] text-slate-600">•</span>
                             <span className="text-[9px] text-slate-400">
                               {alert.email}
                             </span>
+                            {alert.phone && (
+                              <>
+                                <span className="text-[8px] text-slate-600">•</span>
+                                <span className="text-[9px] text-cyan font-mono flex items-center gap-1">
+                                  <Phone className="w-3 h-3 text-cyan inline" />
+                                  {alert.phone}
+                                </span>
+                              </>
+                            )}
                           </div>
 
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[8.5px] text-slate-500 uppercase tracking-wider font-mono">
@@ -2114,10 +1889,8 @@ export default function AdminDashboard({
                       <div className="flex items-center justify-between sm:justify-end gap-6 border-t sm:border-t-0 border-[#2a2c35]/40 pt-3 sm:pt-0">
                         <div className="text-left sm:text-right">
                           <span className="text-[8px] text-slate-500 block uppercase">FUNDS REALIZED:</span>
-                          <span className={`font-mono text-[10px] font-bold block ${isEnroll ? "text-green-400" : "text-yellow-400"}`}>
-                            {isEnroll 
-                              ? (alert.tier === "premium" ? "₹14,999 / $299 PAID" : "₹4,999 / $99 PAID") 
-                              : "₹0 (WAITLIST APPLICATION)"}
+                          <span className="font-mono text-[10px] font-bold block text-green-400">
+                            {alert.tier === "premium" ? "₹14,999 / $299 PAID" : "₹4,999 / $99 PAID"}
                           </span>
                           <span className="text-[8px] text-slate-600 block mt-0.5 uppercase">
                             Timestamp: {alert.timestamp}
@@ -2125,27 +1898,9 @@ export default function AdminDashboard({
                         </div>
 
                         <div>
-                          {isEnroll ? (
-                            <span className="px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 text-[8.5px] font-bold uppercase tracking-widest rounded flex items-center gap-1">
-                              <Check className="w-3.5 h-3.5" /> Enrolled
-                            </span>
-                          ) : (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => handleApproveWaitlist(alert)}
-                                className="px-3.5 py-1.5 bg-gradient-to-r from-yellow-600 to-yellow-800 hover:from-yellow-500 hover:to-yellow-700 text-white font-mono text-[8.5px] font-bold uppercase tracking-widest rounded cursor-pointer transition-all border border-yellow-500/20"
-                              >
-                                APPROVE SEAT
-                              </button>
-                              <button
-                                onClick={() => handleDeclineWaitlist(alert.email)}
-                                className="p-1.5 border border-[#2a2c35] text-slate-500 hover:text-red-400 hover:border-red-500/30 rounded cursor-pointer transition-all"
-                                title="Decline application coordinate"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
+                          <span className="px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 text-[8.5px] font-bold uppercase tracking-widest rounded flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Enrolled
+                          </span>
                         </div>
                       </div>
                     </div>

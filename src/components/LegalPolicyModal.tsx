@@ -11,6 +11,7 @@ import {
   Copy, 
   Printer, 
   AlertTriangle, 
+  Info,
   Mail, 
   Phone, 
   MapPin, 
@@ -290,6 +291,30 @@ export default function LegalPolicyModal({
                       </div>
                     )}
 
+                    {/* Callout box if present */}
+                    {sec.calloutBox && (
+                      <div className={`my-3 p-4 rounded-xl border text-xs sm:text-sm space-y-1.5 shadow-lg relative overflow-hidden ${
+                        sec.calloutBox.type === "warning"
+                          ? "bg-amber-500/10 border-amber-500/40 text-amber-200"
+                          : sec.calloutBox.type === "info"
+                          ? "bg-cyan/10 border-cyan/40 text-cyan-200"
+                          : sec.calloutBox.type === "success"
+                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
+                          : "bg-purple-500/10 border-purple-500/40 text-purple-200"
+                      }`}>
+                        <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider">
+                          {sec.calloutBox.type === "warning" && <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />}
+                          {sec.calloutBox.type === "info" && <Info className="w-4 h-4 text-cyan shrink-0" />}
+                          {sec.calloutBox.type === "success" && <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />}
+                          {(sec.calloutBox.type === "notice" || !["warning", "info", "success"].includes(sec.calloutBox.type)) && <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />}
+                          <span>{sec.calloutBox.title}</span>
+                        </div>
+                        <p className="text-xs text-slate-200 font-sans leading-relaxed pl-6">
+                          {sec.calloutBox.text}
+                        </p>
+                      </div>
+                    )}
+
                     {/* Bullet points if present */}
                     {sec.bulletPoints && sec.bulletPoints.length > 0 && (
                       <ul className="space-y-2 text-xs sm:text-sm text-slate-300 font-sans pl-2">
@@ -356,7 +381,7 @@ export default function LegalPolicyModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-sans">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-sans">
                 <div className="space-y-2 bg-[#090a0f] p-4 rounded-lg border border-[#2a2c35]">
                   <div className="text-slate-400 font-mono uppercase text-[10px] tracking-wider">OFFICER NAME</div>
                   <div className="text-white font-bold text-sm">{GRIEVANCE_OFFICER_DETAILS.name}</div>
@@ -385,14 +410,6 @@ export default function LegalPolicyModal({
                     {GRIEVANCE_OFFICER_DETAILS.phone}
                   </a>
                   <div className="text-slate-400 text-[11px]">Indian Standard Time (IST) Business Hours</div>
-                </div>
-
-                <div className="space-y-2 bg-[#090a0f] p-4 rounded-lg border border-[#2a2c35]">
-                  <div className="text-slate-400 font-mono uppercase text-[10px] tracking-wider">REGISTERED POSTAL ADDRESS</div>
-                  <div className="text-slate-300 leading-relaxed text-[11px] flex items-start gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-cyan shrink-0 mt-0.5" />
-                    <span>{GRIEVANCE_OFFICER_DETAILS.address}</span>
-                  </div>
                 </div>
               </div>
             </div>

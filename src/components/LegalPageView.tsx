@@ -324,7 +324,7 @@ export default function LegalPageView({ pageKey, onNavigateHome }: LegalPageView
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-sans">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-sans">
                 <div className="bg-[#08090d] p-3.5 rounded-xl border border-[#2a2c35] space-y-1">
                   <div className="text-[10px] font-mono text-[#8e919e] uppercase">OPERATED BY</div>
                   <div className="text-white font-bold">{GRIEVANCE_OFFICER_DETAILS.name}</div>
@@ -345,14 +345,6 @@ export default function LegalPageView({ pageKey, onNavigateHome }: LegalPageView
                     <Phone className="w-3.5 h-3.5 text-cyan" />
                     {GRIEVANCE_OFFICER_DETAILS.phone}
                   </a>
-                </div>
-
-                <div className="bg-[#08090d] p-3.5 rounded-xl border border-[#2a2c35] space-y-1">
-                  <div className="text-[10px] font-mono text-[#8e919e] uppercase">POSTAL ADDRESS</div>
-                  <div className="text-[11px] text-slate-300 flex items-start gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-cyan shrink-0 mt-0.5" />
-                    <span>{GRIEVANCE_OFFICER_DETAILS.address}</span>
-                  </div>
                 </div>
               </div>
             </div>

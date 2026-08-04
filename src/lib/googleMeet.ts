@@ -1,16 +1,11 @@
-import { initializeApp } from "firebase/app";
 import { 
-  getAuth, 
   signInWithPopup, 
   GoogleAuthProvider, 
   onAuthStateChanged, 
   User 
 } from "firebase/auth";
-import firebaseConfig from "../../firebase-applet-config.json";
-
-// Initialize Firebase App and Auth
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+import { auth } from "../firebase";
+export { auth };
 
 const provider = new GoogleAuthProvider();
 // Request Google Meet Scopes
