@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "vankayalapatimallikharjunarao@gmail.com" ||
+        (request.auth.token.email != null && (
+          request.auth.token.email.matches(".*@codexia\\.com") ||
+          request.auth.token.email.matches(".*@codexia\\.io")
+        ))
+      );
+    }
+
+    // Students collection: Users can read and update their own record
+    match /students/{uid} {
+      allow read, write: if isOwner(uid) || isAdmin();
+    }
+
+    // Enrollments collection: Users can read and create/update their own enrollment record
+    match /enrollments/{uid} {
+      allow read, write: if isOwner(uid) || isAdmin();
+    }
+
+    match /enrollments/{docId} {
+      allow read, write: if (isAuthenticated() && resource != null && resource.data.uid == request.auth.uid) || isAdmin();
+    }
+
+    // User profiles legacy
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // Telemetry and logs
+    match /telemetry/{docId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Default deny for all unspecified collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
