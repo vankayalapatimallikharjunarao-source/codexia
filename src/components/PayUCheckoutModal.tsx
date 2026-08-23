@@ -51,7 +51,7 @@ export default function PayUCheckoutModal({
   const currencySymbol = sessionData.currency === "USD" ? "$" : "₹";
   const formattedAmount = `${currencySymbol}${sessionData.finalAmount.toLocaleString()}`;
 
-  const fallbackUrl = (sessionData.courseId === "premium") ? "https://u.payu.in/sIgPs2ASSGFz" : "https://u.payu.in/kIznS87tqYcY";
+  const fallbackUrl = (sessionData.courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
 
   const handleOpenGatewayTab = () => {
     const payuUrl = sessionData.redirectUrl || fallbackUrl;

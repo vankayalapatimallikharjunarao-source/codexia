@@ -151,7 +151,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Hardcoded to 3000 per infrastructure requirement
-const PORT = Number(process.env.PORT) || 8080;
+const PORT = 3000;
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
@@ -2674,7 +2674,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     originalPriceUSD: 79,
     offerPriceUSD: 59,
     isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/kIznS87tqYcY"
+    payuRedirectUrl: "https://u.payu.in/crJLw8TgDtWB"
   },
   base: {
     courseId: "base",
@@ -2685,7 +2685,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     originalPriceUSD: 79,
     offerPriceUSD: 59,
     isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/kIznS87tqYcY"
+    payuRedirectUrl: "https://u.payu.in/crJLw8TgDtWB"
   },
   premium: {
     courseId: "premium",
@@ -2696,7 +2696,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     originalPriceUSD: 199,
     offerPriceUSD: 149,
     isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/sIgPs2ASSGFz"
+    payuRedirectUrl: "https://u.payu.in/1rC2wPC1aNFT"
   },
   ai_masterclass: {
     courseId: "ai_masterclass",
@@ -2707,7 +2707,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     originalPriceUSD: 79,
     offerPriceUSD: 59,
     isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/kIznS87tqYcY"
+    payuRedirectUrl: "https://u.payu.in/crJLw8TgDtWB"
   }
 };
 

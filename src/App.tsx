@@ -1277,12 +1277,12 @@ export default function App() {
           window.location.href = data.redirectUrl;
         }
       } else {
-        const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/sIgPs2ASSGFz" : "https://u.payu.in/kIznS87tqYcY";
+        const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
         window.location.href = fallbackUrl;
       }
     } catch (err) {
       console.error("PayU checkout error:", err);
-      const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/sIgPs2ASSGFz" : "https://u.payu.in/kIznS87tqYcY";
+      const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
       window.location.href = fallbackUrl;
     }
   };
