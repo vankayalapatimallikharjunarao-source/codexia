@@ -2645,8 +2645,12 @@ app.get(["/api/payu-config", "/api/razorpay-config"], (req, res) => {
     merchantKey: keyId.trim(),
     salt: "",
     redirectUrl: "",
-    checkoutMode: "hosted",
+    checkoutMode: PAYU_CHECKOUT_MODE === "payment_link" ? "payment_link" : "hosted",
     actionUrl: PAYU_ENV === "test" ? "https://test.payu.in/_payment" : "https://secure.payu.in/_payment",
+    paymentLinks: {
+      base: PAYU_PAYMENT_LINKS.base,
+      premium: PAYU_PAYMENT_LINKS.premium
+    },
     hasSecret: !!(process.env.PAYU_SALT || process.env.VITE_PAYU_SALT),
     detectedVars: foundEnvNames
   });
@@ -2724,6 +2728,22 @@ const PAYU_BASE_URL = PAYU_ENV === "test"
 const PAYU_VERIFY_URL = PAYU_ENV === "test"
   ? "https://test.payu.in/merchant/postservice.php?form=2"
   : "https://info.payu.in/merchant/postservice.php?form=2";
+
+// Optional PayU Payment Link redirection mode. These are merchant-created PayU links.
+// Hosted mode remains available and is the default so server-side transaction
+// verification/provisioning remains intact. Set PAYU_CHECKOUT_MODE=payment_link
+// when you explicitly want the payment gate to redirect to these fixed links.
+const PAYU_CHECKOUT_MODE = (process.env.PAYU_CHECKOUT_MODE || "hosted").toLowerCase();
+const PAYU_PAYMENT_LINKS: Record<string, string> = {
+  base: "https://u.payu.in/crJLw8TgDtWB",
+  standard: "https://u.payu.in/crJLw8TgDtWB",
+  premium: "https://u.payu.in/1rC2wPC1aNFT",
+  ai_masterclass: "https://u.payu.in/crJLw8TgDtWB"
+};
+
+function getPayUPaymentLink(courseId: string): string {
+  return PAYU_PAYMENT_LINKS[courseId.toLowerCase()] || PAYU_PAYMENT_LINKS.standard;
+}
 
 function getPublicAppUrl(req: express.Request): string {
   const configured = (process.env.APP_URL || "").trim().replace(/\/$/, "");
@@ -2918,6 +2938,15 @@ async function verifyPayUTransaction(txnid: string): Promise<{ verified: boolean
   }
 }
 
+// Direct merchant-created PayU Payment Link redirects.
+// This route never calls PayU APIs; it simply redirects the browser to the configured link.
+app.get("/api/payu/payment-link/:courseId", (req, res) => {
+  const courseId = String(req.params.courseId || "standard").toLowerCase();
+  const link = getPayUPaymentLink(courseId);
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  return res.redirect(302, link);
+});
+
 // POST Create PayU Payment Session (server calculates price and signs every unique transaction).
 app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) => {
   if (!PAYU_KEY || !PAYU_SALT) {
@@ -2937,6 +2966,28 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
 
   const normalizedCourseId = (courseId || "standard").toLowerCase();
   const course = SERVER_COURSE_CATALOG[normalizedCourseId] || SERVER_COURSE_CATALOG.standard;
+
+  // Fixed PayU Payment Link mode: no PayU API/session is called by Codexia.
+  // The browser is sent directly to the merchant-created PayU link.
+  // The existing hosted-checkout verification endpoints remain unchanged for
+  // transactions that use PAYU_CHECKOUT_MODE=hosted.
+  if (PAYU_CHECKOUT_MODE === "payment_link") {
+    const paymentLink = getPayUPaymentLink(course.courseId);
+    return res.json({
+      success: true,
+      checkoutMode: "payment_link",
+      courseId: course.courseId,
+      courseName: course.name,
+      finalAmount: undefined,
+      currency: String(currency || "INR").toUpperCase(),
+      redirectUrl: paymentLink,
+      checkoutPageUrl: paymentLink,
+      paymentLink,
+      fallbackRedirectUrl: paymentLink,
+      merchantName: "CODEXIA",
+      verificationWorkflow: "preserved_for_hosted_mode"
+    });
+  }
 
   // Collapse accidental duplicate create-payment calls from the same customer/course for a few seconds.
   // This prevents a rapid double-click or client retry loop from hammering PayU with multiple sessions.
