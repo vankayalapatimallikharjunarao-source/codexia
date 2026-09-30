@@ -23,3 +23,8 @@ View your app in AI Studio: https://ai.studio/apps/83d18cdd-f8f3-49b4-a8dd-10558
 ## Google Cloud Run
 
 This package has been adjusted to use Cloud Run's injected `PORT` and a production Node runtime. See `DEPLOYMENT_NOTES.md`.
+
+
+## PayU payment-link mode
+
+The payment gate is configured for the supplied merchant-created PayU payment-options links. Base and Premium are mapped separately, and the server shows/logs the configured INR amount before redirecting to PayU. Set `PAYU_CHECKOUT_MODE=payment_link`, `PAYU_BASE_AMOUNT_INR=3999`, and `PAYU_PREMIUM_AMOUNT_INR=9999` in Cloud Run.

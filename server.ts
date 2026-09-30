@@ -2735,14 +2735,28 @@ const PAYU_VERIFY_URL = PAYU_ENV === "test"
 // when you explicitly want the payment gate to redirect to these fixed links.
 const PAYU_CHECKOUT_MODE = (process.env.PAYU_CHECKOUT_MODE || "hosted").toLowerCase();
 const PAYU_PAYMENT_LINKS: Record<string, string> = {
-  base: "https://u.payu.in/crJLw8TgDtWB",
-  standard: "https://u.payu.in/crJLw8TgDtWB",
-  premium: "https://u.payu.in/1rC2wPC1aNFT",
-  ai_masterclass: "https://u.payu.in/crJLw8TgDtWB"
+  base: "https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions",
+  standard: "https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions",
+  premium: "https://api.payu.in/public/#/965e0d806e0abcc0ed67cff2601f984f/paymentoptions",
+  ai_masterclass: "https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions"
+};
+
+// These amounts are the amounts shown/logged immediately before the fixed PayU
+// payment-link redirect. Keep them aligned with the amounts configured in the
+// corresponding PayU payment links. They are intentionally server-side values.
+const PAYU_PAYMENT_LINK_AMOUNTS_INR: Record<string, number> = {
+  base: Number(process.env.PAYU_BASE_AMOUNT_INR || 3999),
+  standard: Number(process.env.PAYU_BASE_AMOUNT_INR || 3999),
+  premium: Number(process.env.PAYU_PREMIUM_AMOUNT_INR || 9999),
+  ai_masterclass: Number(process.env.PAYU_BASE_AMOUNT_INR || 3999)
 };
 
 function getPayUPaymentLink(courseId: string): string {
   return PAYU_PAYMENT_LINKS[courseId.toLowerCase()] || PAYU_PAYMENT_LINKS.standard;
+}
+
+function getPayUPaymentLinkAmount(courseId: string): number {
+  return PAYU_PAYMENT_LINK_AMOUNTS_INR[courseId.toLowerCase()] || PAYU_PAYMENT_LINK_AMOUNTS_INR.standard;
 }
 
 function getPublicAppUrl(req: express.Request): string {
@@ -2938,24 +2952,69 @@ async function verifyPayUTransaction(txnid: string): Promise<{ verified: boolean
   }
 }
 
-// Direct merchant-created PayU Payment Link redirects.
-// This route never calls PayU APIs; it simply redirects the browser to the configured link.
+// Merchant-created PayU Payment Link redirect.
+// This route first displays/logs the exact amount configured for the selected
+// cohort, then sends the browser to the corresponding PayU payment-options URL.
 app.get("/api/payu/payment-link/:courseId", (req, res) => {
   const courseId = String(req.params.courseId || "standard").toLowerCase();
-  const link = getPayUPaymentLink(courseId);
+  const course = SERVER_COURSE_CATALOG[courseId] || SERVER_COURSE_CATALOG.standard;
+  const resolvedCourseId = course.courseId;
+  const link = getPayUPaymentLink(resolvedCourseId);
+  const amount = getPayUPaymentLinkAmount(resolvedCourseId);
+  const customerEmail = String(req.query.email || "").trim().toLowerCase();
+
+  // Cloud Run captures stdout as structured application logs. This is the
+  // authoritative log event for the price shown immediately before redirect.
+  console.log(JSON.stringify({
+    event: "PAYU_PAYMENT_REDIRECT",
+    courseId: resolvedCourseId,
+    courseName: course.name,
+    amount,
+    currency: "INR",
+    customerEmail: customerEmail || undefined,
+    paymentLink: link,
+    timestamp: new Date().toISOString()
+  }));
+
+  const safeCourseName = escapeHtml(course.name);
+  const safeAmount = amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const safeLink = escapeHtml(link);
+
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  return res.redirect(302, link);
+  return res.type("html").send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="3;url=${safeLink}">
+  <title>Codexia — PayU Checkout</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; font-family:Inter,Arial,sans-serif; background:#05070d; color:#f8fafc; }
+    .card { width:min(92vw,520px); box-sizing:border-box; padding:36px; border:1px solid rgba(0,242,255,.22); border-radius:22px; background:linear-gradient(145deg,#0d111b,#080a11); box-shadow:0 24px 80px rgba(0,0,0,.45); text-align:center; }
+    .brand { color:#00f2ff; letter-spacing:4px; font-weight:800; font-size:14px; }
+    h1 { margin:18px 0 8px; font-size:26px; }
+    .course { color:#cbd5e1; margin-bottom:24px; }
+    .amount { font-size:40px; font-weight:800; margin:16px 0 8px; }
+    .note { color:#94a3b8; font-size:14px; line-height:1.6; }
+    .btn { display:inline-block; margin-top:22px; padding:13px 22px; border-radius:10px; background:#00f2ff; color:#001014; text-decoration:none; font-weight:800; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">CODEXIA</div>
+    <h1>Secure PayU Checkout</h1>
+    <div class="course">${safeCourseName}</div>
+    <div class="amount">₹${safeAmount}</div>
+    <div class="note">This is the amount configured for this cohort's PayU payment link. Redirecting to PayU in a few seconds…</div>
+    <a class="btn" href="${safeLink}">Continue to PayU</a>
+  </main>
+</body>
+</html>`);
 });
 
 // POST Create PayU Payment Session (server calculates price and signs every unique transaction).
 app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) => {
-  if (!PAYU_KEY || !PAYU_SALT) {
-    return res.status(503).json({
-      success: false,
-      error: "PayU is not configured. Set PAYU_KEY and PAYU_SALT in Cloud Run environment variables."
-    });
-  }
-
   const { courseId, currency, customer } = req.body || {};
 
   const now = Date.now();
@@ -2972,20 +3031,49 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
   // The existing hosted-checkout verification endpoints remain unchanged for
   // transactions that use PAYU_CHECKOUT_MODE=hosted.
   if (PAYU_CHECKOUT_MODE === "payment_link") {
+    // Payment links are merchant-created, fixed-amount PayU links. Codexia
+    // therefore uses a local interstitial first so the customer sees the exact
+    // configured amount and Cloud Run records a structured redirect log before
+    // the browser leaves Codexia for PayU.
     const paymentLink = getPayUPaymentLink(course.courseId);
+    const paymentAmount = getPayUPaymentLinkAmount(course.courseId);
+    const checkoutPageUrl = `${getPublicAppUrl(req)}/api/payu/payment-link/${encodeURIComponent(course.courseId)}`;
+
+    console.log(JSON.stringify({
+      event: "PAYU_PAYMENT_REDIRECT_PREPARED",
+      checkoutMode: "payment_link",
+      courseId: course.courseId,
+      courseName: course.name,
+      amount: paymentAmount,
+      currency: "INR",
+      paymentLink
+    }));
+
     return res.json({
       success: true,
       checkoutMode: "payment_link",
       courseId: course.courseId,
       courseName: course.name,
-      finalAmount: undefined,
-      currency: String(currency || "INR").toUpperCase(),
-      redirectUrl: paymentLink,
-      checkoutPageUrl: paymentLink,
+      originalPrice: course.originalPriceINR,
+      offerPrice: paymentAmount,
+      offerActive: true,
+      finalAmount: paymentAmount,
+      amountStr: paymentAmount.toFixed(2),
+      currency: "INR",
+      redirectUrl: checkoutPageUrl,
+      checkoutPageUrl,
       paymentLink,
       fallbackRedirectUrl: paymentLink,
       merchantName: "CODEXIA",
-      verificationWorkflow: "preserved_for_hosted_mode"
+      priceLogged: true,
+      verificationWorkflow: "payment_link_requires_payu_link_reconciliation_or_callback"
+    });
+  }
+
+  if (!PAYU_KEY || !PAYU_SALT) {
+    return res.status(503).json({
+      success: false,
+      error: "PayU hosted checkout is not configured. Set PAYU_KEY and PAYU_SALT in Cloud Run environment variables, or use PAYU_CHECKOUT_MODE=payment_link for fixed merchant-created links."
     });
   }
 

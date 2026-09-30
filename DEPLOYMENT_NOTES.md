@@ -2,7 +2,7 @@
 
 ## Important
 
-The PayU checkout code has been changed to use PayU Hosted Checkout's server-generated HTML POST to `_payment` instead of redirecting customers to reusable `u.payu.in` payment-link URLs. The server also validates PayU's callback and verifies the transaction server-to-server before provisioning access.
+The package supports two PayU modes. The requested production default is `PAYU_CHECKOUT_MODE=payment_link`, which sends Base and Premium customers through a Codexia price/logging interstitial and then to the supplied PayU `api.payu.in/public/#/.../paymentoptions` links. The previous server-generated Hosted Checkout mode remains available with `PAYU_CHECKOUT_MODE=hosted`; that mode validates PayU callbacks and verifies transactions server-to-server before provisioning access.
 
 ## Cloud Run
 
@@ -31,6 +31,8 @@ APP_URL=https://<your-cloud-run-url-or-custom-domain>
 PAYU_ENV=production
 PAYU_KEY=<production PayU merchant key>
 PAYU_SALT=<production PayU merchant salt>
+PAYU_BASE_AMOUNT_INR=3999
+PAYU_PREMIUM_AMOUNT_INR=9999
 GEMINI_API_KEY=<optional>
 ```
 

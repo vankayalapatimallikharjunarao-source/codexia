@@ -1,14 +1,36 @@
-# PayU Payment Link Redirection Mode
+# CODEXIA PayU Payment-Link Mode
 
-This package supports the requested merchant-created PayU payment links:
+## Current merchant-created PayU links
 
-- Base Cohort: https://u.payu.in/crJLw8TgDtWB
-- Premium Alpha: https://u.payu.in/1rC2wPC1aNFT
+- **Base Cohort:** `https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions`
+- **Premium Cohort:** `https://api.payu.in/public/#/965e0d806e0abcc0ed67cff2601f984f/paymentoptions`
 
-Set `PAYU_CHECKOUT_MODE=payment_link` to make `/api/create-payu-payment` return the fixed PayU link as `redirectUrl`, and to enable `/api/payu/payment-link/:courseId`.
+## Price display + logging
 
-## Important verification behavior
+When the payment gate calls `/api/create-payu-payment` with `courseId=base` or `courseId=premium`, the server returns a **Codexia interstitial URL** rather than sending the browser directly to PayU.
 
-`PAYU_CHECKOUT_MODE=payment_link` does not create a server-side PayU transaction, so the hosted-checkout callback/`verify_payment` workflow cannot automatically verify that static payment-link transaction unless the merchant-created PayU link itself is configured in PayU to return to a compatible merchant callback. The existing server-side verification workflow has therefore been preserved and remains the default when `PAYU_CHECKOUT_MODE=hosted`.
+The interstitial:
 
-PayU's current Hosted Checkout documentation uses a server-generated POST to `https://secure.payu.in/_payment` with a unique `txnid` and SHA-512 hash.
+1. Shows the configured cohort price to the customer.
+2. Writes a structured `PAYU_PAYMENT_REDIRECT` event to stdout.
+3. Cloud Run captures that stdout as application logs.
+4. Redirects the browser to the exact merchant-created PayU `paymentoptions` URL after 3 seconds, with a manual **Continue to PayU** button.
+
+Configured defaults:
+
+- Base Cohort: **INR 3,999.00**
+- Premium Cohort: **INR 9,999.00**
+
+You can change these server-side with `PAYU_BASE_AMOUNT_INR` and `PAYU_PREMIUM_AMOUNT_INR`. Keep them synchronized with the actual amount configured in the PayU links.
+
+## API behavior
+
+`POST /api/create-payu-payment` returns: `redirectUrl`, `paymentLink`, `finalAmount`, `amountStr`, `currency`, and `priceLogged`. The frontend should navigate to `redirectUrl`.
+
+`GET /api/payu/payment-link/base` and `GET /api/payu/payment-link/premium` show/log the amount and then redirect to PayU.
+
+## Important payment-link limitation
+
+These are fixed merchant-created PayU payment-option links, not the server-generated Hosted Checkout `_payment` flow. PayU's Hosted Checkout supports merchant-generated transaction IDs, amounts, request hashes, and `surl`/`furl` callbacks. Fixed Payment Links are managed separately by PayU. Therefore, this mode can reliably show/log the configured amount before redirect, but it does **not** create the same `txnid` in Codexia's `pendingPayuOrders` store or automatically bind the external payment-link payment to that store. If automatic post-payment enrollment is required, configure PayU Payment Link status/webhook/reconciliation support or use the existing `PAYU_CHECKOUT_MODE=hosted` flow.
+
+PayU documentation: Hosted Checkout request/response and redirect handling are documented by PayU.
