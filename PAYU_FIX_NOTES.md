@@ -2,7 +2,7 @@
 
 ## What caused the visible error
 
-The old checkout path could redirect the customer to a reusable `u.payu.in` PayU payment-link URL. The screenshot error is PayU's own "Too many Requests" response.
+The payment-link checkout path now redirects through the supplied Cloud Run `/api/payu/checkout-direct` endpoints. The screenshot error is PayU's own "Too many Requests" response.
 
 This version removes that short-payment-link redirect from the server-side checkout flow.
 
@@ -23,7 +23,7 @@ This version removes that short-payment-link redirect from the server-side check
 - 8-second duplicate-session collapse for rapid double-clicks / frontend retry loops.
 - No-cache headers on the checkout form.
 - PayU salt is never returned by `/api/payu-config`.
-- Old `u.payu.in` payment-link URLs are no longer used by the checkout engine.
+- The checkout engine now uses the supplied Cloud Run `/api/payu/checkout-direct` URLs for Base and Premium.
 - Cloud Run uses `process.env.PORT` with an 8080 fallback.
 
 ## Required Cloud Run variables

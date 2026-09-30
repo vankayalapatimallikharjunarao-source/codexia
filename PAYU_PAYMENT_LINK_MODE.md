@@ -2,8 +2,8 @@
 
 ## Current merchant-created PayU links
 
-- **Base Cohort:** `https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions`
-- **Premium Cohort:** `https://api.payu.in/public/#/965e0d806e0abcc0ed67cff2601f984f/paymentoptions`
+- **Base Cohort:** `https://ais-dev-rffbl3drvahic2immp4x2t-526609645001.asia-east1.run.app/api/payu/checkout-direct?courseId=standard&currency=INR`
+- **Premium Cohort:** `https://ais-dev-rffbl3drvahic2immp4x2t-526609645001.asia-east1.run.app/api/payu/checkout-direct?courseId=premium&currency=INR`
 
 ## Price display + logging
 

@@ -2735,10 +2735,10 @@ const PAYU_VERIFY_URL = PAYU_ENV === "test"
 // when you explicitly want the payment gate to redirect to these fixed links.
 const PAYU_CHECKOUT_MODE = (process.env.PAYU_CHECKOUT_MODE || "hosted").toLowerCase();
 const PAYU_PAYMENT_LINKS: Record<string, string> = {
-  base: "https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions",
-  standard: "https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions",
-  premium: "https://api.payu.in/public/#/965e0d806e0abcc0ed67cff2601f984f/paymentoptions",
-  ai_masterclass: "https://api.payu.in/public/#/cb6837c412ad4b181e2f3879034e0c2e/paymentoptions"
+  base: "https://ais-dev-rffbl3drvahic2immp4x2t-526609645001.asia-east1.run.app/api/payu/checkout-direct?courseId=standard&currency=INR",
+  standard: "https://ais-dev-rffbl3drvahic2immp4x2t-526609645001.asia-east1.run.app/api/payu/checkout-direct?courseId=standard&currency=INR",
+  premium: "https://ais-dev-rffbl3drvahic2immp4x2t-526609645001.asia-east1.run.app/api/payu/checkout-direct?courseId=premium&currency=INR",
+  ai_masterclass: "https://ais-dev-rffbl3drvahic2immp4x2t-526609645001.asia-east1.run.app/api/payu/checkout-direct?courseId=standard&currency=INR"
 };
 
 // These amounts are the amounts shown/logged immediately before the fixed PayU

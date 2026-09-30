@@ -2,7 +2,7 @@
 
 ## Important
 
-The package supports two PayU modes. The requested production default is `PAYU_CHECKOUT_MODE=payment_link`, which sends Base and Premium customers through a Codexia price/logging interstitial and then to the supplied PayU `api.payu.in/public/#/.../paymentoptions` links. The previous server-generated Hosted Checkout mode remains available with `PAYU_CHECKOUT_MODE=hosted`; that mode validates PayU callbacks and verifies transactions server-to-server before provisioning access.
+The package supports two PayU modes. The requested production default is `PAYU_CHECKOUT_MODE=payment_link`, which sends Base and Premium customers through a Codexia price/logging interstitial and then to the supplied Cloud Run `/api/payu/checkout-direct` links. The previous server-generated Hosted Checkout mode remains available with `PAYU_CHECKOUT_MODE=hosted`; that mode validates PayU callbacks and verifies transactions server-to-server before provisioning access.
 
 ## Cloud Run
 
