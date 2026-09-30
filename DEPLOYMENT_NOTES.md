@@ -1,45 +1,56 @@
-# CODEXIA — Google Cloud Run Ready Package
+# Codexia — Cloud Run + PayU Deployment Notes
 
-## What was changed
+## Important
 
-- Server no longer hard-codes port 3000.
-- Server reads Cloud Run's injected `PORT` and falls back to 8080.
-- Server listens on `0.0.0.0`.
-- Production build bundles `server.ts` to `dist/server.cjs`.
-- Docker runtime starts `dist/server.cjs` (not the previous incorrect `dist/server.mjs`).
-- Dockerfile uses Node 20 and `npm ci`.
-- `.gcloudignore` keeps the source files required for the build.
-- `APP_URL` has a safe local fallback and should be set to the public HTTPS URL in Cloud Run.
-- PayU credentials remain server-side.
+The PayU checkout code has been changed to use PayU Hosted Checkout's server-generated HTML POST to `_payment` instead of redirecting customers to reusable `u.payu.in` payment-link URLs. The server also validates PayU's callback and verifies the transaction server-to-server before provisioning access.
 
-## Deploy
+## Cloud Run
 
-From this folder:
+The server listens on the Cloud Run supplied `PORT` value and falls back to `8080` locally. It binds to `0.0.0.0`.
+
+Build output expected by `package.json`:
+
+- `dist/index.html`
+- `dist/server.cjs`
+
+The Dockerfile starts `dist/server.cjs`.
+
+Do not manually set `PORT` to a different value in the application code.
+
+## Deploy from this folder
 
 ```bash
 gcloud run deploy codexia --source . --region asia-south1
 ```
 
-Or build/deploy the Dockerfile through Cloud Build.
-
-In Cloud Run, configure:
+After deployment, set:
 
 ```text
 NODE_ENV=production
-APP_URL=https://YOUR-PUBLIC-DOMAIN
-GEMINI_API_KEY=...
+APP_URL=https://<your-cloud-run-url-or-custom-domain>
 PAYU_ENV=production
-PAYU_KEY=...
-PAYU_SALT=...
+PAYU_KEY=<production PayU merchant key>
+PAYU_SALT=<production PayU merchant salt>
+GEMINI_API_KEY=<optional>
 ```
 
-Do not set `PORT` manually; Cloud Run injects it.
+For SMTP/email features, also configure the SMTP/Gmail variables from `cloudrun.env.example`.
 
-## Important source status
+## PayU callback URL
 
-The files supplied for this rebuild do NOT include the original `src/` directory. `index.html` references `src/main.tsx`, and `server.ts` imports:
+The application generates:
 
-- `src/data/legalDocuments`
-- `src/utils/certificateGenerator`
+```text
+https://<APP_URL>/api/payu/callback
+```
 
-Therefore this package is Cloud Run configuration/build corrected, but the original frontend source must be restored into `src/` before the original application can be built. No missing application source was invented.
+or, if `APP_URL` is omitted, it derives the public URL from the incoming Cloud Run request.
+
+## Source files still required
+
+The supplied project files do not contain the original `src/` directory. The existing `index.html` references `src/main.tsx`, and `server.ts` imports:
+
+- `src/data/legalDocuments.ts`
+- `src/utils/certificateGenerator.ts`
+
+Restore the original `src/` directory before running `npm run build` or deploying this folder. The missing source was intentionally not invented or replaced.

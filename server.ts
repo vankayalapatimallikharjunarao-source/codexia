@@ -147,10 +147,12 @@ async function sendCertificateEmail(params: {
 
 
 const app = express();
+// Cloud Run terminates TLS at the proxy; trust the forwarded protocol/host for callback URLs.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Cloud Run injects PORT. Use 8080 as the local/production fallback.
+// Cloud Run provides PORT at runtime. Use 8080 as the local/production fallback.
 const PORT = Number(process.env.PORT) || 8080;
 
 // Initialize Gemini safely
@@ -2636,17 +2638,16 @@ app.get(["/api/payu-config", "/api/razorpay-config"], (req, res) => {
               process.env.VITE_RAZORPAY_KEY_ID || 
               process.env.RAZORPAY_KEY_ID || "";
               
-  let salt = process.env.VITE_PAYU_SALT || process.env.PAYU_SALT || "";
-  let redirectUrl = process.env.VITE_PAYU_REDIRECT_URL || 
-                    process.env.PAYU_REDIRECT_URL || 
-                    "https://dashboard-staging.payu.in/web/09F6BE64849DE07077F857BDEBAD373B";
-
+  // Never expose PAYU_SALT or any merchant secret to the browser.
+  // Checkout is created and signed server-side by /api/create-payu-payment.
   res.json({
     keyId: keyId.trim(),
     merchantKey: keyId.trim(),
-    salt: salt.trim(),
-    redirectUrl: redirectUrl.trim(),
-    hasSecret: !!salt || envKeys.some(k => k.toUpperCase().includes("SECRET")),
+    salt: "",
+    redirectUrl: "",
+    checkoutMode: "hosted",
+    actionUrl: PAYU_ENV === "test" ? "https://test.payu.in/_payment" : "https://secure.payu.in/_payment",
+    hasSecret: !!(process.env.PAYU_SALT || process.env.VITE_PAYU_SALT),
     detectedVars: foundEnvNames
   });
 });
@@ -2661,7 +2662,6 @@ interface ServerCourseInfo {
   originalPriceUSD: number;
   offerPriceUSD: number;
   isOfferActive: boolean;
-  payuRedirectUrl: string;
 }
 
 const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
@@ -2673,8 +2673,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     offerPriceINR: 3999,
     originalPriceUSD: 79,
     offerPriceUSD: 59,
-    isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/crJLw8TgDtWB"
+    isOfferActive: true
   },
   base: {
     courseId: "base",
@@ -2684,8 +2683,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     offerPriceINR: 3999,
     originalPriceUSD: 79,
     offerPriceUSD: 59,
-    isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/crJLw8TgDtWB"
+    isOfferActive: true
   },
   premium: {
     courseId: "premium",
@@ -2695,8 +2693,7 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     offerPriceINR: 9999,
     originalPriceUSD: 199,
     offerPriceUSD: 149,
-    isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/1rC2wPC1aNFT"
+    isOfferActive: true
   },
   ai_masterclass: {
     courseId: "ai_masterclass",
@@ -2706,65 +2703,302 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
     offerPriceINR: 3999,
     originalPriceUSD: 79,
     offerPriceUSD: 59,
-    isOfferActive: true,
-    payuRedirectUrl: "https://u.payu.in/crJLw8TgDtWB"
+    isOfferActive: true
   }
 };
 
 const pendingPayuOrders: Record<string, any> = {};
 
-// PayU Credentials & Environment Setup
-const PAYU_KEY = process.env.PAYU_KEY || process.env.VITE_PAYU_MERCHANT_KEY || "PAYU_MERCHANT_KEY";
-const PAYU_SALT = process.env.PAYU_SALT || "PAYU_MERCHANT_SALT";
-const PAYU_ENV = process.env.PAYU_ENV || "production"; // 'production' or 'test'
-const PAYU_BASE_URL = PAYU_ENV === "test" 
-  ? "https://test.payu.in/_payment" 
-  : "https://secure.payu.in/_payment";
+// Prevent duplicate frontend clicks / React retries from creating several PayU sessions in a few milliseconds.
+// This is intentionally short-lived so a genuine retry can still create a fresh transaction.
+const recentPayuSessionRequests = new Map<string, { txnid: string; createdAt: number }>();
+const PAYU_DUPLICATE_WINDOW_MS = 8000;
 
-// POST Create PayU Payment Session (Server-Side Price Calculation & Signed Hash Generation)
+// PayU credentials must be supplied as Cloud Run/server environment variables.
+const PAYU_KEY = process.env.PAYU_KEY || process.env.VITE_PAYU_MERCHANT_KEY || "";
+const PAYU_SALT = process.env.PAYU_SALT || "";
+const PAYU_ENV = (process.env.PAYU_ENV || "production").toLowerCase();
+const PAYU_BASE_URL = PAYU_ENV === "test"
+  ? "https://test.payu.in/_payment"
+  : "https://secure.payu.in/_payment";
+const PAYU_VERIFY_URL = PAYU_ENV === "test"
+  ? "https://test.payu.in/merchant/postservice.php?form=2"
+  : "https://info.payu.in/merchant/postservice.php?form=2";
+
+function getPublicAppUrl(req: express.Request): string {
+  const configured = (process.env.APP_URL || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+
+  // Cloud Run forwards the original scheme. `trust proxy` is enabled below.
+  const protocol = req.protocol || "https";
+  const host = req.get("host");
+  return host ? `${protocol}://${host}` : `http://localhost:${PORT}`;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeEqualHex(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+function buildPayURequestHash(params: {
+  txnid: string;
+  amount: string;
+  productinfo: string;
+  firstname: string;
+  email: string;
+  udf1?: string;
+  udf2?: string;
+  udf3?: string;
+  udf4?: string;
+  udf5?: string;
+}): string {
+  // PayU Hosted Checkout basic _payment hash:
+  // key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT
+  const sequence = [
+    PAYU_KEY,
+    params.txnid,
+    params.amount,
+    params.productinfo,
+    params.firstname,
+    params.email,
+    params.udf1 || "",
+    params.udf2 || "",
+    params.udf3 || "",
+    params.udf4 || "",
+    params.udf5 || "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    PAYU_SALT
+  ].join("|");
+  return crypto.createHash("sha512").update(sequence).digest("hex");
+}
+
+function buildPayUReverseHash(payload: Record<string, any>, order: any): string {
+  // PayU reverse hash:
+  // SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
+  const status = String(payload.status || "");
+  const udf1 = String(payload.udf1 || "");
+  const udf2 = String(payload.udf2 || "");
+  const udf3 = String(payload.udf3 || "");
+  const udf4 = String(payload.udf4 || "");
+  const udf5 = String(payload.udf5 || "");
+  const email = String(payload.email || order.customer?.email || "");
+  const firstname = String(payload.firstname || order.customer?.firstname || "");
+  const productinfo = String(payload.productinfo || order.courseName || "");
+  const amount = String(payload.amount || order.finalAmount.toFixed(2));
+  const txnid = String(payload.txnid || order.txnid || "");
+
+  const sequence = [
+    PAYU_SALT,
+    status,
+    "", "", "", "", "",
+    udf5,
+    udf4,
+    udf3,
+    udf2,
+    udf1,
+    email,
+    firstname,
+    productinfo,
+    amount,
+    txnid,
+    PAYU_KEY
+  ].join("|");
+
+  return crypto.createHash("sha512").update(sequence).digest("hex");
+}
+
+function provisionPaidOrder(order: any, payload: Record<string, any>) {
+  const buyerEmail = String(payload.email || order.customer?.email || order.email || "").trim();
+  const buyerName = String(
+    payload.firstname ||
+    order.customer?.firstname ||
+    order.customer?.fullName ||
+    order.customer?.name ||
+    (buyerEmail ? buyerEmail.split("@")[0] : "Student")
+  ).trim();
+  const buyerPhone = String(payload.phone || order.customer?.phone || "").trim();
+  const track = (order.track || (order.courseId?.includes("premium") ? "premium" : "base")) as "base" | "premium";
+
+  if (!buyerEmail) return;
+
+  const enrollingCohort = Array.from(cohorts.values()).find(c => c.track === track && c.status === "enrolling");
+  const cohortId = enrollingCohort
+    ? enrollingCohort.id
+    : (track === "base" ? "CODX-2026-07-BASE-01" : "CODX-2026-07-PREMIUM-01");
+
+  studentProfiles.set(buyerEmail, {
+    email: buyerEmail,
+    username: buyerName,
+    phone: buyerPhone,
+    track,
+    cohort_id: cohortId
+  });
+  serverStore.has_paid = true;
+
+  const amountINR = order.currency === "INR"
+    ? order.finalAmount
+    : Math.round((order.finalAmount || 0) * 83);
+  const amountUSD = order.currency === "USD"
+    ? order.finalAmount
+    : Math.round((order.finalAmount || 0) / 83);
+
+  const newReg = {
+    email: buyerEmail,
+    username: buyerName,
+    name: buyerName,
+    phone: buyerPhone,
+    trackId: track === "premium" ? "track-premium" : "track-base",
+    timestamp: new Date().toISOString(),
+    tier: track,
+    amountUSD,
+    amountINR,
+    cohort_id: cohortId
+  };
+
+  const existingReg = serverStore.recently_registered?.find(
+    (r: any) => r.email === buyerEmail && r.cohort_id === cohortId
+  );
+  if (existingReg) {
+    existingReg.username = buyerName;
+    existingReg.name = buyerName;
+    existingReg.phone = buyerPhone;
+  } else {
+    serverStore.recently_registered = [newReg, ...(serverStore.recently_registered || [])];
+  }
+
+  console.log(`[PAYU AUTO-PROVISIONING] Student ${buyerName} (${buyerEmail}) admitted to cohort ${cohortId}`);
+}
+
+async function verifyPayUTransaction(txnid: string): Promise<{ verified: boolean; data?: any; error?: string }> {
+  if (!PAYU_KEY || !PAYU_SALT) {
+    return { verified: false, error: "PayU credentials are not configured on the server" };
+  }
+
+  const hash = crypto
+    .createHash("sha512")
+    .update(`${PAYU_KEY}|verify_payment|${txnid}|${PAYU_SALT}`)
+    .digest("hex");
+
+  try {
+    const response = await fetch(PAYU_VERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        key: PAYU_KEY,
+        command: "verify_payment",
+        var1: txnid,
+        hash
+      })
+    });
+
+    const data = await response.json();
+    const details = data?.transaction_details?.[txnid];
+    const verified = response.ok && String(data?.status) === "1" && String(details?.status || "").toLowerCase() === "success";
+    return { verified, data, error: verified ? undefined : "PayU Verify Payment did not confirm success" };
+  } catch (error: any) {
+    return { verified: false, error: error?.message || "Unable to contact PayU Verify Payment API" };
+  }
+}
+
+// POST Create PayU Payment Session (server calculates price and signs every unique transaction).
 app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) => {
+  if (!PAYU_KEY || !PAYU_SALT) {
+    return res.status(503).json({
+      success: false,
+      error: "PayU is not configured. Set PAYU_KEY and PAYU_SALT in Cloud Run environment variables."
+    });
+  }
+
   const { courseId, currency, customer } = req.body || {};
 
-  // Check if masterclass offer timer has expired
   const now = Date.now();
   if (masterclassActive && masterclassExpirationTime && now >= masterclassExpirationTime) {
     masterclassActive = false;
     masterclassExpirationTime = null;
   }
 
-  // Resolve course from backend catalog (never trust frontend prices)
   const normalizedCourseId = (courseId || "standard").toLowerCase();
-  const course = SERVER_COURSE_CATALOG[normalizedCourseId] || SERVER_COURSE_CATALOG["standard"];
+  const course = SERVER_COURSE_CATALOG[normalizedCourseId] || SERVER_COURSE_CATALOG.standard;
 
-  const isUSD = currency === "USD";
+  // Collapse accidental duplicate create-payment calls from the same customer/course for a few seconds.
+  // This prevents a rapid double-click or client retry loop from hammering PayU with multiple sessions.
+  const requestedCurrency = String(currency || "INR").toUpperCase();
+  const requestCustomerEmail = String(customer?.email || "student@codexia.academy").trim().toLowerCase();
+  const duplicateKey = `${requestCustomerEmail}|${course.courseId}|${requestedCurrency}`;
+  const previousRequest = recentPayuSessionRequests.get(duplicateKey);
+  if (previousRequest && Date.now() - previousRequest.createdAt < PAYU_DUPLICATE_WINDOW_MS) {
+    const existingOrder = pendingPayuOrders[previousRequest.txnid];
+    if (existingOrder) {
+      const existingCheckoutPageUrl = `${getPublicAppUrl(req)}/api/payu/checkout/${encodeURIComponent(existingOrder.txnid)}`;
+      return res.json({
+        success: true,
+        txnid: existingOrder.txnid,
+        courseId: existingOrder.courseId,
+        courseName: existingOrder.courseName,
+        originalPrice: existingOrder.originalPrice,
+        offerPrice: existingOrder.offerPrice,
+        offerActive: existingOrder.isOfferActive,
+        finalAmount: existingOrder.finalAmount,
+        amountStr: existingOrder.payuParams.amount,
+        currency: existingOrder.currency,
+        redirectUrl: existingCheckoutPageUrl,
+        checkoutPageUrl: existingCheckoutPageUrl,
+        actionUrl: PAYU_BASE_URL,
+        payuParams: existingOrder.payuParams,
+        merchantName: "CODEXIA",
+        verifiedOnServer: true,
+        duplicateRequestCollapsed: true
+      });
+    }
+  }
+
+  // Standard PayU India Hosted Checkout is INR. USD/Cross-Border must be enabled on the merchant account.
+  // Do not silently submit USD to a domestic-only merchant account.
+  if (requestedCurrency !== "INR" && requestedCurrency !== "USD") {
+    return res.status(400).json({ success: false, error: "Unsupported currency" });
+  }
+
+  const isUSD = requestedCurrency === "USD";
   const originalPrice = isUSD ? course.originalPriceUSD : course.originalPriceINR;
   const offerPrice = isUSD ? course.offerPriceUSD : course.offerPriceINR;
-
-  // Authoritative offer active status synced with server masterclass state
   const isOfferValid = masterclassActive && course.isOfferActive;
   const finalAmount = isOfferValid ? offerPrice : originalPrice;
   const amountStr = finalAmount.toFixed(2);
 
-  const txnid = `PAYU_${course.courseId.toUpperCase()}_${Date.now()}_${Math.floor(Math.random() * 8999 + 1000)}`;
+  const txnid = `PAYU_${course.courseId.toUpperCase()}_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+  const firstname = String(customer?.firstname || customer?.name || "Student").trim().slice(0, 60);
+  const email = String(customer?.email || "student@codexia.academy").trim();
+  const phone = String(customer?.phone || "9999999999").trim();
+  const productinfo = String(course.name).slice(0, 100);
 
-  const firstname = customer?.firstname || customer?.name || "Student";
-  const email = customer?.email || "student@codexia.academy";
-  const phone = customer?.phone || "9999999999";
-  const productinfo = course.name;
-
-  const appBaseUrl = (process.env.APP_URL || "").replace(/\/$/, "") || `http://localhost:${PORT}`;
+  const appBaseUrl = getPublicAppUrl(req);
   const surl = `${appBaseUrl}/api/payu/callback`;
   const furl = `${appBaseUrl}/api/payu/callback`;
 
-  // PayU SHA-512 Hash sequence: key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||salt
-  const hashSequence = `${PAYU_KEY}|${txnid}|${amountStr}|${productinfo}|${firstname}|${email}|||||||||||${PAYU_SALT}`;
-  const hash = crypto.createHash("sha512").update(hashSequence).digest("hex");
+  const hash = buildPayURequestHash({ txnid, amount: amountStr, productinfo, firstname, email });
 
   const payuParams: Record<string, string> = {
     key: PAYU_KEY,
     txnid,
     amount: amountStr,
-    currency: isUSD ? "USD" : "INR",
     productinfo,
     firstname,
     email,
@@ -2772,10 +3006,17 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     surl,
     furl,
     hash,
-    service_provider: "payu_paisa"
+    udf1: "",
+    udf2: "",
+    udf3: "",
+    udf4: "",
+    udf5: ""
   };
 
-  // Store transaction session on server
+  // `currency=USD` is only meaningful when the PayU merchant account is enabled for the relevant
+  // cross-border flow. The default Codexia checkout remains INR.
+  if (isUSD) payuParams.currency = "USD";
+
   pendingPayuOrders[txnid] = {
     txnid,
     courseId: course.courseId,
@@ -2784,27 +3025,33 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     offerPrice,
     finalAmount,
     currency: isUSD ? "USD" : "INR",
-    isOfferActive: course.isOfferActive,
+    isOfferActive: isOfferValid,
     status: "created",
-    redirectUrl: course.payuRedirectUrl,
     payuParams,
     customer: { firstname, email, phone },
     createdAt: new Date().toISOString()
   };
+  recentPayuSessionRequests.set(duplicateKey, { txnid, createdAt: Date.now() });
+  setTimeout(() => {
+    const current = recentPayuSessionRequests.get(duplicateKey);
+    if (current?.txnid === txnid) recentPayuSessionRequests.delete(duplicateKey);
+  }, PAYU_DUPLICATE_WINDOW_MS).unref?.();
 
-  res.json({
+  const checkoutPageUrl = `${appBaseUrl}/api/payu/checkout/${encodeURIComponent(txnid)}`;
+
+  return res.json({
     success: true,
     txnid,
     courseId: course.courseId,
     courseName: course.name,
     originalPrice,
     offerPrice,
-    offerActive: course.isOfferActive,
+    offerActive: isOfferValid,
     finalAmount,
     amountStr,
     currency: isUSD ? "USD" : "INR",
-    redirectUrl: course.payuRedirectUrl,
-    checkoutPageUrl: `/api/payu/checkout/${txnid}`,
+    redirectUrl: checkoutPageUrl,
+    checkoutPageUrl,
     actionUrl: PAYU_BASE_URL,
     payuParams,
     merchantName: "CODEXIA",
@@ -2812,204 +3059,122 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
   });
 });
 
-// GET Auto-Submit Checkout Redirect (Pre-fills and LOCKS exact amount on PayU portal)
+// PayU Hosted Checkout requires a POST to _payment. This route renders an auto-submitting
+// form instead of redirecting to a reusable PayU payment-link/short URL.
 app.get("/api/payu/checkout/:txnid", (req, res) => {
   const { txnid } = req.params;
   const order = pendingPayuOrders[txnid];
 
   if (!order) {
-    return res.status(404).send("<html><body style='background:#0d0e13;color:#fff;font-family:sans-serif;text-align:center;padding:50px;'><h2>Transaction session expired or invalid. Please return to Codexia and try enrolling again.</h2></body></html>");
+    return res.status(404).send("<html><body style='font-family:sans-serif;padding:40px'><h2>Transaction session expired.</h2><p>Please return to Codexia and start checkout again.</p></body></html>");
   }
 
-  const { payuParams } = order;
-  const actionUrl = PAYU_BASE_URL;
+  const fields = Object.entries(order.payuParams as Record<string, string>)
+    .map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`)
+    .join("\n");
 
-  const isUSDOrder = order.currency === "USD";
-  const currSymbol = isUSDOrder ? "$" : "₹";
-
-  // Render HTML document that auto-posts directly to PayU with the locked price and SHA-512 hash
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Redirecting to PayU Payment Gateway...</title>
-  <style>
-    body { background-color: #0d0e13; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-    .card { background: #151821; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2.5rem; border-radius: 16px; text-align: center; max-width: 440px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
-    .spinner { border: 3px solid rgba(16, 185, 129, 0.1); border-top: 3px solid #10b981; border-radius: 50%; width: 44px; height: 44px; animation: spin 0.8s linear infinite; margin: 0 auto 1.5rem; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    .amount { font-size: 2rem; font-weight: 800; color: #10b981; margin: 0.75rem 0; font-family: monospace; }
-    .info { font-size: 0.85rem; color: #9ca3af; line-height: 1.5; margin-top: 1rem; }
-    button { background: #10b981; color: #000; border: none; padding: 0.85rem 1.75rem; border-radius: 10px; font-weight: 800; font-size: 0.9rem; text-transform: uppercase; margin-top: 1.5rem; cursor: pointer; letter-spacing: 0.05em; }
-    button:hover { background: #34d399; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="spinner"></div>
-    <h3 style="margin:0 0 0.5rem 0; font-size:1.25rem;">Connecting to PayU Gateway...</h3>
-    <p style="margin:0; color:#cbd5e1; font-size:0.95rem;">Locked Item: <strong>${order.courseName}</strong></p>
-    <div class="amount">${currSymbol}${order.finalAmount.toLocaleString()} ${order.currency}</div>
-    <p class="info">Authoritative amount locked by server. You are being redirected to PayU's secure payment page.</p>
-    
-    <form id="payu_form" action="${actionUrl}" method="post">
-      <input type="hidden" name="key" value="${payuParams.key}" />
-      <input type="hidden" name="txnid" value="${payuParams.txnid}" />
-      <input type="hidden" name="amount" value="${payuParams.amount}" />
-      <input type="hidden" name="currency" value="${order.currency || 'INR'}" />
-      <input type="hidden" name="productinfo" value="${payuParams.productinfo}" />
-      <input type="hidden" name="firstname" value="${payuParams.firstname}" />
-      <input type="hidden" name="email" value="${payuParams.email}" />
-      <input type="hidden" name="phone" value="${payuParams.phone}" />
-      <input type="hidden" name="surl" value="${payuParams.surl}" />
-      <input type="hidden" name="furl" value="${payuParams.furl}" />
-      <input type="hidden" name="hash" value="${payuParams.hash}" />
-      <input type="hidden" name="service_provider" value="${payuParams.service_provider}" />
-      <button type="submit">Proceed to PayU Checkout</button>
-    </form>
-  </div>
-  <script>
-    setTimeout(function() {
-      document.getElementById("payu_form").submit();
-    }, 400);
-  </script>
-</body>
-</html>`;
-
-  res.send(html);
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  return res.type("html").send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Redirecting to PayU</title></head>
+<body style="font-family:Arial,sans-serif;text-align:center;padding:48px">
+  <p>Redirecting securely to PayU…</p>
+  <form id="payu-form" method="post" action="${escapeHtml(PAYU_BASE_URL)}">
+    ${fields}
+    <noscript><button type="submit">Continue to PayU</button></noscript>
+  </form>
+  <script>document.getElementById('payu-form').submit();</script>
+</body></html>`);
 });
 
-// Callback route: PayU posts response back to surl / furl
-app.all("/api/payu/callback", (req, res) => {
-  const payload = { ...req.query, ...req.body };
-  const { txnid, status, amount, productinfo, firstname, email, hash: payuHash } = payload;
-
+// PayU posts the payment result to surl/furl. Never mark an order paid from status alone:
+// validate the reverse hash, transaction ID, amount, product, merchant key and success status.
+app.all("/api/payu/callback", async (req, res) => {
+  const payload: Record<string, any> = { ...req.query, ...req.body };
+  const txnid = String(payload.txnid || "");
   const order = pendingPayuOrders[txnid];
-  if (order) {
-    // Reverse Hash verification: salt|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
-    const reverseHashSeq = `${PAYU_SALT}|${status || "success"}||||||||||${email || order.customer?.email || ""}|${firstname || order.customer?.firstname || ""}|${productinfo || order.courseName}|${amount || order.finalAmount.toFixed(2)}|${txnid}|${PAYU_KEY}`;
-    const calculatedHash = crypto.createHash("sha512").update(reverseHashSeq).digest("hex");
+  let finalStatus = "FAILED";
 
-    const isSuccess = status === "success" || status === "SUCCESS" || (!status && txnid);
+  if (order && payload.key === PAYU_KEY) {
+    const receivedHash = String(payload.hash || "").toLowerCase();
+    const calculatedHash = buildPayUReverseHash(payload, order);
+    const responseAmount = Number(payload.amount);
+    const expectedAmount = Number(order.finalAmount);
+    const responseProduct = String(payload.productinfo || "");
+    const responseStatus = String(payload.status || "").toLowerCase();
 
-    if (isSuccess) {
+    const validResponse =
+      safeEqualHex(receivedHash, calculatedHash) &&
+      txnid === order.txnid &&
+      Number.isFinite(responseAmount) && Math.abs(responseAmount - expectedAmount) < 0.001 &&
+      responseProduct === String(order.courseName) &&
+      responseStatus === "success";
+
+    if (validResponse) {
       order.status = "PAID";
       order.verifiedAt = new Date().toISOString();
       order.payuResponse = payload;
 
-      // Auto-provision student profile & bind to currently enrolling cohort
-      const buyerEmail = (email || order.customer?.email || order.email || "").toString().trim();
-      const buyerName = (firstname || order.customer?.firstname || order.customer?.fullName || order.customer?.name || (buyerEmail ? buyerEmail.split("@")[0] : "Student")).toString().trim();
-      const buyerPhone = (payload.phone || order.customer?.phone || "").toString().trim();
-      const track = (order.track || (order.courseId?.includes("premium") ? "premium" : "base")) as "base" | "premium";
-      if (buyerEmail) {
-        const enrollingCohort = Array.from(cohorts.values()).find(c => c.track === track && c.status === "enrolling");
-        const cohortId = enrollingCohort ? enrollingCohort.id : (track === "base" ? "CODX-2026-07-BASE-01" : "CODX-2026-07-PREMIUM-01");
-
-        studentProfiles.set(buyerEmail, {
-          email: buyerEmail,
-          username: buyerName,
-          phone: buyerPhone,
-          track,
-          cohort_id: cohortId
-        });
-        serverStore.has_paid = true;
-
-        const amountINR = order.currency === "INR" ? order.finalAmount : Math.round((order.finalAmount || (track === "premium" ? (masterclassActive ? 149 : 199) : (masterclassActive ? 59 : 79))) * 83);
-        const amountUSD = order.currency === "USD" ? order.finalAmount : Math.round((order.finalAmount || (track === "premium" ? (masterclassActive ? 9999 : 12999) : (masterclassActive ? 3999 : 4999))) / 83);
-        const newReg = {
-          email: buyerEmail,
-          username: buyerName,
-          name: buyerName,
-          phone: buyerPhone,
-          trackId: track === "premium" ? "track-premium" : "track-base",
-          timestamp: new Date().toISOString(),
-          tier: track,
-          amountUSD,
-          amountINR,
-          cohort_id: cohortId
-        };
-        const existingReg = serverStore.recently_registered?.find((r: any) => r.email === buyerEmail && r.cohort_id === cohortId);
-        if (existingReg) {
-          existingReg.username = buyerName;
-          existingReg.name = buyerName;
-          existingReg.phone = buyerPhone;
-        } else {
-          serverStore.recently_registered = [newReg, ...(serverStore.recently_registered || [])];
-        }
-        console.log(`[PAYU AUTO-PROVISIONING] Student ${buyerName} (${buyerEmail}, Phone: ${buyerPhone}) auto-admitted to enrolling cohort ${cohortId}`);
+      // Reconcile with PayU's server-to-server Verify Payment API before provisioning access.
+      const verification = await verifyPayUTransaction(txnid);
+      if (verification.verified) {
+        order.status = "PAID";
+        order.payuVerification = verification.data;
+        provisionPaidOrder(order, payload);
+        finalStatus = "PAID";
+      } else {
+        order.status = "PENDING_VERIFICATION";
+        order.payuVerificationError = verification.error;
+        finalStatus = "PENDING_VERIFICATION";
+        console.warn(`[PAYU] Callback hash was valid but Verify Payment did not confirm ${txnid}: ${verification.error}`);
       }
     } else {
       order.status = "FAILED";
+      order.payuResponse = payload;
+      console.warn(`[PAYU] Rejected callback for ${txnid}: hash/amount/product/status validation failed.`);
     }
+  } else {
+    console.warn(`[PAYU] Callback received for unknown transaction or invalid merchant key: ${txnid}`);
   }
 
-  // Redirect back to frontend homepage with query parameters
-  res.redirect(`/?payment=success&txnid=${txnid || ""}&status=${order?.status || "PAID"}`);
+  const redirectStatus = finalStatus === "PAID" ? "success" : finalStatus.toLowerCase();
+  return res.redirect(`/?payment=${encodeURIComponent(redirectStatus)}&txnid=${encodeURIComponent(txnid)}&status=${encodeURIComponent(finalStatus)}`);
 });
 
-// POST Verify PayU Payment Status (Backend Ledger Check)
-app.post("/api/payu/verify-payment", (req, res) => {
+// Verify endpoint: reconcile with PayU, then provision only after PayU confirms success.
+app.post("/api/payu/verify-payment", async (req, res) => {
   const { txnid } = req.body || {};
 
   if (!txnid || !pendingPayuOrders[txnid]) {
-    return res.status(404).json({
-      verified: false,
-      error: "Transaction session not found or invalid"
-    });
+    return res.status(404).json({ verified: false, error: "Transaction session not found or invalid" });
   }
 
   const order = pendingPayuOrders[txnid];
-  order.status = "verified";
-  order.verifiedAt = new Date().toISOString();
+  const verification = await verifyPayUTransaction(String(txnid));
 
-  // Auto-provision student profile & bind to currently enrolling cohort
-  const buyerEmail = (order.customer?.email || order.email || "").toString().trim();
-  const buyerName = (order.customer?.firstname || order.customer?.fullName || order.customer?.name || (buyerEmail ? buyerEmail.split("@")[0] : "Student")).toString().trim();
-  const buyerPhone = (order.customer?.phone || "").toString().trim();
-  const track = (order.track || (order.courseId?.includes("premium") ? "premium" : "base")) as "base" | "premium";
-  if (buyerEmail) {
-    const enrollingCohort = Array.from(cohorts.values()).find(c => c.track === track && c.status === "enrolling");
-    const cohortId = enrollingCohort ? enrollingCohort.id : (track === "base" ? "CODX-2026-07-BASE-01" : "CODX-2026-07-PREMIUM-01");
-
-    studentProfiles.set(buyerEmail, {
-      email: buyerEmail,
-      username: buyerName,
-      phone: buyerPhone,
-      track,
-      cohort_id: cohortId
+  if (!verification.verified) {
+    return res.status(409).json({
+      verified: false,
+      txnid: order.txnid,
+      payment_status: order.status,
+      error: verification.error || "PayU has not confirmed this transaction"
     });
-    serverStore.has_paid = true;
-
-    const amountINR = order.currency === "INR" ? order.finalAmount : Math.round((order.finalAmount || (track === "premium" ? (masterclassActive ? 149 : 199) : (masterclassActive ? 59 : 79))) * 83);
-    const amountUSD = order.currency === "USD" ? order.finalAmount : Math.round((order.finalAmount || (track === "premium" ? (masterclassActive ? 9999 : 12999) : (masterclassActive ? 3999 : 4999))) / 83);
-    const newReg = {
-      email: buyerEmail,
-      username: buyerName,
-      name: buyerName,
-      phone: buyerPhone,
-      trackId: track === "premium" ? "track-premium" : "track-base",
-      timestamp: new Date().toISOString(),
-      tier: track,
-      amountUSD,
-      amountINR,
-      cohort_id: cohortId
-    };
-    const existingReg = serverStore.recently_registered?.find((r: any) => r.email === buyerEmail && r.cohort_id === cohortId);
-    if (existingReg) {
-      existingReg.username = buyerName;
-      existingReg.name = buyerName;
-      existingReg.phone = buyerPhone;
-    } else {
-      serverStore.recently_registered = [newReg, ...(serverStore.recently_registered || [])];
-    }
   }
 
+  const details = verification.data?.transaction_details?.[String(txnid)] || {};
+  if (details.amount && Math.abs(Number(details.amount) - Number(order.finalAmount)) >= 0.001) {
+    return res.status(409).json({ verified: false, txnid: order.txnid, error: "PayU amount does not match the order amount" });
+  }
+
+  order.status = "PAID";
+  order.verifiedAt = new Date().toISOString();
+  order.payuVerification = verification.data;
+  provisionPaidOrder(order, details);
+
+  const track = (order.track || (order.courseId?.includes("premium") ? "premium" : "base")) as "base" | "premium";
   const enrollingCohort = Array.from(cohorts.values()).find(c => c.track === track && c.status === "enrolling");
   const resolvedCohortId = enrollingCohort ? enrollingCohort.id : (track === "base" ? "CODX-2026-07-BASE-01" : "CODX-2026-07-PREMIUM-01");
 
-  res.json({
+  return res.json({
     verified: true,
     txnid: order.txnid,
     courseId: order.courseId,
@@ -3020,8 +3185,8 @@ app.post("/api/payu/verify-payment", (req, res) => {
     cohort_id: resolvedCohortId,
     finalAmount: order.finalAmount,
     currency: order.currency,
-    purchased_at: order.verifiedAt || new Date().toISOString(),
-    message: "Payment successfully verified through server-side ledger"
+    purchased_at: order.verifiedAt,
+    message: "Payment verified with PayU Verify Payment API"
   });
 });
 
@@ -3287,6 +3452,6 @@ async function setupVite() {
 
 setupVite().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 });

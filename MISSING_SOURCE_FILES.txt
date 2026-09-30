@@ -8,4 +8,5 @@ Required by server.ts:
   src/utils/certificateGenerator.ts
 
 Restore the original src/ directory into this folder before deployment.
-This package intentionally does not invent or replace the missing original application source.
+The PayU and Cloud Run fixes are already applied to server.ts.
+The missing application source was intentionally not invented or replaced.
