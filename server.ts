@@ -150,8 +150,8 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Hardcoded to 3000 per infrastructure requirement
-const PORT = 3000;
+// Cloud Run provides PORT at runtime. Fall back to 3000 for local development.
+const PORT = Number(process.env.PORT) || 3000;
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
@@ -3233,6 +3233,6 @@ async function setupVite() {
 
 setupVite().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 });

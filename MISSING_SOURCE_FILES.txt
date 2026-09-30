@@ -1,0 +1,15 @@
+IMPORTANT
+
+The uploaded project did not include the src/ directory.
+
+The supplied index.html references:
+  /src/main.tsx
+
+server.ts imports:
+  ./src/data/legalDocuments
+  ./src/utils/certificateGenerator
+
+Therefore this folder contains all files supplied in the conversation plus deployment fixes, but it is NOT a fully runnable copy of the original application until the original src/ directory is copied into this folder.
+
+Do not delete or replace the original src directory. Copy it into the project root exactly as:
+  codexia_fixed/src/...
