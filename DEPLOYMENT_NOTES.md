@@ -1,25 +1,45 @@
-# Codexia deployment fixes
+# CODEXIA — Google Cloud Run Ready Package
 
-## Changes made
-- Server now reads `process.env.PORT` and falls back to 3000 locally.
-- Production server starts with `NODE_ENV=production`.
-- Production bundle is ESM (`dist/server.mjs`) so Vite can be loaded correctly.
-- Build tooling needed by `npm run build` is available during production/container builds.
-- Added a multi-stage Dockerfile for Cloud Run.
-- Added `cloudrun.env.example` for runtime configuration.
+## What was changed
 
-## Before deploying
-This package is only complete if the application's `src/` directory is present. The supplied `server.ts` imports:
-- `./src/data/legalDocuments`
-- `./src/utils/certificateGenerator`
-and `index.html` loads `/src/main.tsx`.
+- Server no longer hard-codes port 3000.
+- Server reads Cloud Run's injected `PORT` and falls back to 8080.
+- Server listens on `0.0.0.0`.
+- Production build bundles `server.ts` to `dist/server.cjs`.
+- Docker runtime starts `dist/server.cjs` (not the previous incorrect `dist/server.mjs`).
+- Dockerfile uses Node 20 and `npm ci`.
+- `.gcloudignore` keeps the source files required for the build.
+- `APP_URL` has a safe local fallback and should be set to the public HTTPS URL in Cloud Run.
+- PayU credentials remain server-side.
 
-Those source files were not included in the uploaded files used to create this package. Do NOT deploy this folder until the original `src/` directory is copied into the project root.
+## Deploy
 
-## Build
-npm ci
-npm run build
-npm start
+From this folder:
 
-## Cloud Run
-Use the included Dockerfile. Cloud Run should supply PORT automatically. Set NODE_ENV=production and add the required secrets/environment variables.
+```bash
+gcloud run deploy codexia --source . --region asia-south1
+```
+
+Or build/deploy the Dockerfile through Cloud Build.
+
+In Cloud Run, configure:
+
+```text
+NODE_ENV=production
+APP_URL=https://YOUR-PUBLIC-DOMAIN
+GEMINI_API_KEY=...
+PAYU_ENV=production
+PAYU_KEY=...
+PAYU_SALT=...
+```
+
+Do not set `PORT` manually; Cloud Run injects it.
+
+## Important source status
+
+The files supplied for this rebuild do NOT include the original `src/` directory. `index.html` references `src/main.tsx`, and `server.ts` imports:
+
+- `src/data/legalDocuments`
+- `src/utils/certificateGenerator`
+
+Therefore this package is Cloud Run configuration/build corrected, but the original frontend source must be restored into `src/` before the original application can be built. No missing application source was invented.

@@ -18,3 +18,8 @@ View your app in AI Studio: https://ai.studio/apps/83d18cdd-f8f3-49b4-a8dd-10558
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+
+## Google Cloud Run
+
+This package has been adjusted to use Cloud Run's injected `PORT` and a production Node runtime. See `DEPLOYMENT_NOTES.md`.

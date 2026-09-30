@@ -1,15 +1,11 @@
-IMPORTANT
+The supplied project files do not include the original src/ directory.
 
-The uploaded project did not include the src/ directory.
+Required by index.html:
+  src/main.tsx
 
-The supplied index.html references:
-  /src/main.tsx
+Required by server.ts:
+  src/data/legalDocuments.ts
+  src/utils/certificateGenerator.ts
 
-server.ts imports:
-  ./src/data/legalDocuments
-  ./src/utils/certificateGenerator
-
-Therefore this folder contains all files supplied in the conversation plus deployment fixes, but it is NOT a fully runnable copy of the original application until the original src/ directory is copied into this folder.
-
-Do not delete or replace the original src directory. Copy it into the project root exactly as:
-  codexia_fixed/src/...
+Restore the original src/ directory into this folder before deployment.
+This package intentionally does not invent or replace the missing original application source.

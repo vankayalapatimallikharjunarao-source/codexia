@@ -150,8 +150,8 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Hardcoded to 3000 per infrastructure requirement
-const PORT = 3000;
+// Cloud Run injects PORT. Use 8080 as the local/production fallback.
+const PORT = Number(process.env.PORT) || 8080;
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
@@ -2752,7 +2752,7 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
   const phone = customer?.phone || "9999999999";
   const productinfo = course.name;
 
-  const appBaseUrl = process.env.APP_URL || "http://localhost:3000";
+  const appBaseUrl = (process.env.APP_URL || "").replace(/\/$/, "") || `http://localhost:${PORT}`;
   const surl = `${appBaseUrl}/api/payu/callback`;
   const furl = `${appBaseUrl}/api/payu/callback`;
 
