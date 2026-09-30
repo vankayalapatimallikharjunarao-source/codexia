@@ -3013,6 +3013,77 @@ app.get("/api/payu/payment-link/:courseId", (req, res) => {
 </html>`);
 });
 
+// Direct locked-price checkout endpoint.
+// This is intentionally GET-friendly so a cohort card can link directly to:
+//   /api/payu/checkout-direct?courseId=standard&currency=INR
+// or
+//   /api/payu/checkout-direct?courseId=premium&currency=INR
+// No amount parameter is accepted from the browser. The amount is selected
+// exclusively from SERVER_COURSE_CATALOG and signed into the PayU request.
+app.get("/api/payu/checkout-direct", (req, res) => {
+  const normalizedCourseId = String(req.query.courseId || "standard").toLowerCase();
+  const course = SERVER_COURSE_CATALOG[normalizedCourseId] || SERVER_COURSE_CATALOG.standard;
+  const requestedCurrency = String(req.query.currency || "INR").toUpperCase();
+
+  if (requestedCurrency !== "INR") {
+    return res.status(400).send("<html><body style='font-family:Arial,sans-serif;padding:40px'><h2>INR checkout required</h2><p>This locked cohort checkout is configured for INR.</p></body></html>");
+  }
+
+  if (!PAYU_KEY || !PAYU_SALT) {
+    return res.status(503).send("<html><body style='font-family:Arial,sans-serif;padding:40px'><h2>Payment gateway is not configured</h2><p>Set PAYU_KEY and PAYU_SALT in Cloud Run environment variables.</p></body></html>");
+  }
+
+  // Never accept a customer-supplied amount. This is the locked cohort price.
+  const finalAmount = course.offerPriceINR;
+  const amountStr = finalAmount.toFixed(2);
+  const txnid = `PAYU_${course.courseId.toUpperCase()}_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+  const firstname = String(req.query.name || "Student").trim().slice(0, 60) || "Student";
+  const email = String(req.query.email || "student@codexia.academy").trim();
+  const phone = String(req.query.phone || "9999999999").trim();
+  const productinfo = String(course.name).slice(0, 100);
+  const appBaseUrl = getPublicAppUrl(req);
+  const surl = `${appBaseUrl}/api/payu/callback`;
+  const furl = `${appBaseUrl}/api/payu/callback`;
+  const hash = buildPayURequestHash({ txnid, amount: amountStr, productinfo, firstname, email });
+
+  const payuParams: Record<string, string> = {
+    key: PAYU_KEY, txnid, amount: amountStr, productinfo, firstname, email, phone,
+    surl, furl, hash, udf1: "", udf2: "", udf3: "", udf4: "", udf5: ""
+  };
+
+  pendingPayuOrders[txnid] = {
+    txnid, courseId: course.courseId, courseName: course.name,
+    originalPrice: course.originalPriceINR, offerPrice: course.offerPriceINR,
+    finalAmount, currency: "INR", isOfferActive: true, status: "created",
+    payuParams, customer: { firstname, email, phone }, createdAt: new Date().toISOString()
+  };
+
+  console.log(JSON.stringify({
+    event: "PAYU_LOCKED_CHECKOUT_CREATED",
+    checkoutMode: "hosted_locked", courseId: course.courseId,
+    courseName: course.name, amount: finalAmount, currency: "INR", txnid
+  }));
+
+  const fields = Object.entries(payuParams)
+    .map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`)
+    .join("\n");
+
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  return res.type("html").send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codexia — Secure Checkout</title></head>
+<body style="font-family:Arial,sans-serif;text-align:center;padding:48px;background:#f8fafc;color:#0f172a">
+  <div style="max-width:520px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:18px;padding:32px;box-shadow:0 15px 45px rgba(15,23,42,.10)">
+    <div style="font-weight:800;letter-spacing:2px;color:#0f766e">CODEXIAINDIA</div>
+    <h2 style="margin-bottom:8px">${escapeHtml(course.name)}</h2>
+    <p style="color:#64748b">Your cohort price is locked for this checkout.</p>
+    <div style="font-size:42px;font-weight:800;margin:24px 0">₹${finalAmount.toLocaleString("en-IN")}</div>
+    <p style="color:#64748b">Redirecting securely to PayU…</p>
+    <form id="payu-form" method="post" action="${escapeHtml(PAYU_BASE_URL)}">${fields}<noscript><button type="submit">Continue to PayU</button></noscript></form>
+  </div>
+  <script>document.getElementById('payu-form').submit();</script>
+</body></html>`);
+});
+
 // POST Create PayU Payment Session (server calculates price and signs every unique transaction).
 app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) => {
   const { courseId, currency, customer } = req.body || {};
@@ -3037,7 +3108,7 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     // the browser leaves Codexia for PayU.
     const paymentLink = getPayUPaymentLink(course.courseId);
     const paymentAmount = getPayUPaymentLinkAmount(course.courseId);
-    const checkoutPageUrl = `${getPublicAppUrl(req)}/api/payu/payment-link/${encodeURIComponent(course.courseId)}`;
+    const checkoutPageUrl = `${getPublicAppUrl(req)}/api/payu/checkout-direct?courseId=${encodeURIComponent(course.courseId)}&currency=INR`;
 
     console.log(JSON.stringify({
       event: "PAYU_PAYMENT_REDIRECT_PREPARED",
@@ -3115,11 +3186,15 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     return res.status(400).json({ success: false, error: "Unsupported currency" });
   }
 
+  // IMPORTANT: The payment amount is authoritative on the server.
+  // The browser only selects the cohort; it never supplies the amount.
+  // For the locked cohort checkout, INR always uses the exact price shown
+  // in SERVER_COURSE_CATALOG (Base ₹3,999 / Executive Track ₹9,999).
   const isUSD = requestedCurrency === "USD";
   const originalPrice = isUSD ? course.originalPriceUSD : course.originalPriceINR;
   const offerPrice = isUSD ? course.offerPriceUSD : course.offerPriceINR;
-  const isOfferValid = masterclassActive && course.isOfferActive;
-  const finalAmount = isOfferValid ? offerPrice : originalPrice;
+  const isOfferValid = true;
+  const finalAmount = offerPrice;
   const amountStr = finalAmount.toFixed(2);
 
   const txnid = `PAYU_${course.courseId.toUpperCase()}_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
