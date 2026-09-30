@@ -1239,83 +1239,7 @@ export default function App() {
     customerDetails?: { fullName: string; email: string; phone: string }
   ) => {
     setIsConfirmationOpen(false);
-
-    const fallbackUrl = (courseId === "premium") 
-      ? "https://u.payu.in/1rC2wPC1aNFT" 
-      : "https://u.payu.in/crJLw8TgDtWB";
-
-    // 10-Year Payment Gateway Specialist Architecture:
-    // Synchronously open checkout window during the user click gesture to prevent browser popup blockers.
-    // PayU links (u.payu.in) enforce X-Frame-Options: DENY and BotD rate-limiting when trapped inside iframes,
-    // so navigating a clean top-level browsing context guarantees zero 429 "Too many Requests" rate-limit triggers.
-    let checkoutTab: Window | null = null;
-    try {
-      checkoutTab = window.open("about:blank", "_blank");
-      if (checkoutTab) {
-        checkoutTab.document.write(`<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Connecting to PayU Payment Gateway...</title>
-    <style>
-      body { background: #0d0e13; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
-      .card { background: #151821; border: 1px solid rgba(6, 182, 212, 0.3); padding: 2.5rem; border-radius: 16px; max-width: 440px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
-      .spinner { border: 3px solid rgba(6, 182, 212, 0.1); border-top: 3px solid #06b6d4; border-radius: 50%; width: 44px; height: 44px; animation: spin 0.8s linear infinite; margin: 0 auto 1.5rem; }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      h2 { margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 700; color: #fff; }
-      p { margin: 0; color: #94a3b8; font-size: 0.875rem; line-height: 1.5; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <div class="spinner"></div>
-      <h2>Connecting to PayU Gateway</h2>
-      <p>Securing checkout session and redirecting to official payment portal...</p>
-    </div>
-  </body>
-</html>`);
-      }
-    } catch (e) {
-      console.warn("Could not pre-open checkout window:", e);
-    }
-
     showNotification("AUTHORITATIVE PRICE VERIFIED BY BACKEND // REDIRECTING TO PAYU GATEWAY...");
-
-    const navigateToDestination = (destUrl: string) => {
-      // 1. If clean top-level tab was pre-opened during user click, navigate it cleanly
-      if (checkoutTab && !checkoutTab.closed) {
-        checkoutTab.location.replace(destUrl);
-        return;
-      }
-
-      // 2. Frame-busting: If running in an iframe (e.g. preview environment), break out to top window
-      try {
-        if (window.top && window.top !== window) {
-          window.top.location.href = destUrl;
-          return;
-        }
-      } catch (err) {
-        // Cross-origin iframe restricted top-level navigation
-      }
-
-      // 3. Fallback: Programmatic anchor dispatch with target="_blank"
-      try {
-        const link = document.createElement("a");
-        link.href = destUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        return;
-      } catch (err) {
-        // Continue to fallback
-      }
-
-      // 4. Direct window location fallback
-      window.location.href = destUrl;
-    };
 
     try {
       const firstname = customerDetails?.fullName || currentUser?.displayName || "Student User";
@@ -1341,14 +1265,25 @@ export default function App() {
       if (data && data.success) {
         showNotification(`PRICE LOCKED AT ${data.currency === "USD" ? "$" : "₹"}${data.finalAmount} // CONNECTING TO PAYU GATEWAY`);
         setPayuSession(data);
-        const targetUrl = data.redirectUrl || fallbackUrl;
-        navigateToDestination(targetUrl);
+        
+        // Auto-post form redirect page with server-signed locked amount
+        if (data.checkoutPageUrl) {
+          window.location.href = data.checkoutPageUrl;
+          return;
+        }
+
+        // Direct browser redirection if custom redirect URL
+        if (data.redirectUrl) {
+          window.location.href = data.redirectUrl;
+        }
       } else {
-        navigateToDestination(fallbackUrl);
+        const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
+        window.location.href = fallbackUrl;
       }
     } catch (err) {
       console.error("PayU checkout error:", err);
-      navigateToDestination(fallbackUrl);
+      const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
+      window.location.href = fallbackUrl;
     }
   };
 

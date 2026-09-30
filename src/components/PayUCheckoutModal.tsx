@@ -191,50 +191,35 @@ export default function PayUCheckoutModal({
               </div>
             </div>
           ) : activePortalTab === "payu_iframe" ? (
-            /* Dedicated Secure External Launch View (Prevents iframe X-Frame-Options & BotD rate-limit rejections) */
-            <div className="p-8 flex flex-col items-center text-center space-y-5">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
-                <ExternalLink className="w-8 h-8" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-white mb-1">
-                  Official PayU Gateway Checkout
-                </h3>
-                <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-                  For banking compliance and anti-fraud protection, PayU requires completing payment directly in a secure, authenticated browser tab.
-                </p>
-              </div>
-
-              <div className="w-full max-w-md p-4 bg-[#12141d] rounded-xl border border-white/10 text-left space-y-2">
-                <div className="flex justify-between text-xs text-slate-400 font-mono">
-                  <span>Selected Program:</span>
-                  <span className="text-white font-bold">{sessionData.courseName}</span>
-                </div>
-                <div className="flex justify-between text-xs text-slate-400 font-mono">
-                  <span>Locked Amount:</span>
-                  <span className="text-emerald-400 font-bold">{formattedAmount}</span>
-                </div>
-                <div className="flex justify-between text-xs text-slate-400 font-mono">
-                  <span>Gateway Provider:</span>
-                  <span className="text-white">PayU Payments Private Limited</span>
-                </div>
+            /* Embedded Iframe View of Staging Dashboard */
+            <div className="p-4 flex flex-col items-center">
+              <div className="w-full flex items-center justify-between mb-3 text-xs text-slate-400 font-mono">
+                <span>Official PayU Staging Portal URL:</span>
+                <button
+                  type="button"
+                  onClick={handleOpenGatewayTab}
+                  className="text-emerald-400 hover:underline flex items-center gap-1 font-bold cursor-pointer"
+                >
+                  <span>Open in New Tab</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={handleOpenGatewayTab}
-                className="w-full max-w-md py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-mono font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
-              >
-                <span>Open Official PayU Portal</span>
-                <ExternalLink className="w-4 h-4" />
-              </button>
+              <div className="w-full h-[450px] bg-white rounded-xl overflow-hidden border border-white/20 relative shadow-inner">
+                <iframe
+                  src={sessionData.redirectUrl || fallbackUrl}
+                  title="PayU Gateway"
+                  className="w-full h-full border-0"
+                  allow="payment"
+                />
+              </div>
 
               <button
                 type="button"
                 onClick={handleBookNowPayment}
-                className="w-full max-w-md py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 font-mono font-semibold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 border border-white/10"
+                className="mt-4 w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-black font-mono font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
               >
-                <span>Verify Status & Grant Access</span>
+                <span>Verify Payment & Grant Access</span>
                 <ShieldCheck className="w-4 h-4" />
               </button>
             </div>

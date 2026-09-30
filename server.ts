@@ -150,8 +150,8 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Cloud Run provides PORT at runtime. Fall back to 3000 for local development.
-const PORT = Number(process.env.PORT) || 3000;
+// Hardcoded to 3000 per infrastructure requirement
+const PORT = 3000;
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
@@ -2804,7 +2804,7 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     amountStr,
     currency: isUSD ? "USD" : "INR",
     redirectUrl: course.payuRedirectUrl,
-    checkoutPageUrl: undefined,
+    checkoutPageUrl: `/api/payu/checkout/${txnid}`,
     actionUrl: PAYU_BASE_URL,
     payuParams,
     merchantName: "CODEXIA",
@@ -2812,7 +2812,7 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
   });
 });
 
-// GET Auto-Submit Checkout Redirect (Redirects cleanly to the authoritative PayU payment link)
+// GET Auto-Submit Checkout Redirect (Pre-fills and LOCKS exact amount on PayU portal)
 app.get("/api/payu/checkout/:txnid", (req, res) => {
   const { txnid } = req.params;
   const order = pendingPayuOrders[txnid];
@@ -2821,9 +2821,63 @@ app.get("/api/payu/checkout/:txnid", (req, res) => {
     return res.status(404).send("<html><body style='background:#0d0e13;color:#fff;font-family:sans-serif;text-align:center;padding:50px;'><h2>Transaction session expired or invalid. Please return to Codexia and try enrolling again.</h2></body></html>");
   }
 
-  // Redirect directly to the official PayU payment link to avoid fake POST rate-limiting
-  const targetUrl = order.redirectUrl || (order.courseId === "premium" ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB");
-  return res.redirect(302, targetUrl);
+  const { payuParams } = order;
+  const actionUrl = PAYU_BASE_URL;
+
+  const isUSDOrder = order.currency === "USD";
+  const currSymbol = isUSDOrder ? "$" : "₹";
+
+  // Render HTML document that auto-posts directly to PayU with the locked price and SHA-512 hash
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redirecting to PayU Payment Gateway...</title>
+  <style>
+    body { background-color: #0d0e13; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #151821; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2.5rem; border-radius: 16px; text-align: center; max-width: 440px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+    .spinner { border: 3px solid rgba(16, 185, 129, 0.1); border-top: 3px solid #10b981; border-radius: 50%; width: 44px; height: 44px; animation: spin 0.8s linear infinite; margin: 0 auto 1.5rem; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .amount { font-size: 2rem; font-weight: 800; color: #10b981; margin: 0.75rem 0; font-family: monospace; }
+    .info { font-size: 0.85rem; color: #9ca3af; line-height: 1.5; margin-top: 1rem; }
+    button { background: #10b981; color: #000; border: none; padding: 0.85rem 1.75rem; border-radius: 10px; font-weight: 800; font-size: 0.9rem; text-transform: uppercase; margin-top: 1.5rem; cursor: pointer; letter-spacing: 0.05em; }
+    button:hover { background: #34d399; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h3 style="margin:0 0 0.5rem 0; font-size:1.25rem;">Connecting to PayU Gateway...</h3>
+    <p style="margin:0; color:#cbd5e1; font-size:0.95rem;">Locked Item: <strong>${order.courseName}</strong></p>
+    <div class="amount">${currSymbol}${order.finalAmount.toLocaleString()} ${order.currency}</div>
+    <p class="info">Authoritative amount locked by server. You are being redirected to PayU's secure payment page.</p>
+    
+    <form id="payu_form" action="${actionUrl}" method="post">
+      <input type="hidden" name="key" value="${payuParams.key}" />
+      <input type="hidden" name="txnid" value="${payuParams.txnid}" />
+      <input type="hidden" name="amount" value="${payuParams.amount}" />
+      <input type="hidden" name="currency" value="${order.currency || 'INR'}" />
+      <input type="hidden" name="productinfo" value="${payuParams.productinfo}" />
+      <input type="hidden" name="firstname" value="${payuParams.firstname}" />
+      <input type="hidden" name="email" value="${payuParams.email}" />
+      <input type="hidden" name="phone" value="${payuParams.phone}" />
+      <input type="hidden" name="surl" value="${payuParams.surl}" />
+      <input type="hidden" name="furl" value="${payuParams.furl}" />
+      <input type="hidden" name="hash" value="${payuParams.hash}" />
+      <input type="hidden" name="service_provider" value="${payuParams.service_provider}" />
+      <button type="submit">Proceed to PayU Checkout</button>
+    </form>
+  </div>
+  <script>
+    setTimeout(function() {
+      document.getElementById("payu_form").submit();
+    }, 400);
+  </script>
+</body>
+</html>`;
+
+  res.send(html);
 });
 
 // Callback route: PayU posts response back to surl / furl
@@ -3233,6 +3287,6 @@ async function setupVite() {
 
 setupVite().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 });
