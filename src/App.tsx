@@ -1262,28 +1262,42 @@ export default function App() {
       });
 
       const data = await res.json();
-      if (data && data.success) {
+      if (data && data.success && data.payuParams) {
         showNotification(`PRICE LOCKED AT ${data.currency === "USD" ? "$" : "₹"}${data.finalAmount} // CONNECTING TO PAYU GATEWAY`);
         setPayuSession(data);
         
-        // Auto-post form redirect page with server-signed locked amount
-        if (data.checkoutPageUrl) {
-          window.location.href = data.checkoutPageUrl;
-          return;
+        // Auto-post form directly into PayU Hosted Checkout Gateway (Image 1)
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = data.actionUrl || "https://secure.payu.in/_payment";
+        form.style.display = "none";
+
+        for (const [key, val] of Object.entries(data.payuParams)) {
+          if (val !== undefined && val !== null) {
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = key;
+            input.value = String(val);
+            form.appendChild(input);
+          }
         }
 
-        // Direct browser redirection if custom redirect URL
-        if (data.redirectUrl) {
-          window.location.href = data.redirectUrl;
-        }
-      } else {
-        const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
-        window.location.href = fallbackUrl;
+        document.body.appendChild(form);
+        form.submit();
+        return;
       }
+
+      // If checkoutPageUrl exists, redirect to it
+      if (data && data.checkoutPageUrl) {
+        window.location.href = data.checkoutPageUrl;
+        return;
+      }
+
+      // Universal self-contained checkout endpoint redirect
+      window.location.href = `/api/payu/checkout-direct?courseId=${courseId}&currency=${pricingCurrency}`;
     } catch (err) {
       console.error("PayU checkout error:", err);
-      const fallbackUrl = (courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
-      window.location.href = fallbackUrl;
+      window.location.href = `/api/payu/checkout-direct?courseId=${courseId}&currency=${pricingCurrency}`;
     }
   };
 

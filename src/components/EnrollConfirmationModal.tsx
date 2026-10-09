@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Check, X, Star, ShieldCheck, Sparkles, Percent, User, Mail, Phone, ArrowRight } from "lucide-react";
+import { Check, X, Star, ShieldCheck, Sparkles, Percent, User, Mail, Phone, ArrowRight, ArrowUpRight } from "lucide-react";
 import { PricingTier } from "../types";
 
 export interface CustomerDetails {
@@ -299,10 +299,10 @@ export default function EnrollConfirmationModal({
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 bg-cyan text-black font-mono text-xs font-bold uppercase tracking-widest hover:bg-cyan/90 transition-all rounded-lg cursor-pointer text-center flex items-center justify-center gap-1.5"
+                className="flex-1 py-2.5 bg-cyan text-black font-mono text-xs font-bold uppercase tracking-widest hover:bg-cyan/90 transition-all rounded-lg cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-md shadow-cyan/20"
               >
-                Continue to Pay
-                <ArrowRight className="w-4 h-4" />
+                Proceed to PayU
+                <ArrowUpRight className="w-4 h-4" />
               </button>
             </div>
           </form>

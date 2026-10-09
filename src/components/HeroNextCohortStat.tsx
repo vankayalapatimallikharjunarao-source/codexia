@@ -6,44 +6,88 @@ interface HeroNextCohortStatProps {
   onClick?: () => void;
 }
 
+const DEFAULT_COHORT: Cohort = {
+  id: "CODX-2026-10-BASE-01",
+  name: "October 2026 Base Cohort",
+  track: "base",
+  repo_url: "https://github.com/codexia-academy/base-sprint-october-2026",
+  documents: [],
+  status: "enrolling",
+  start_date: "2026-10-15",
+  end_date: "2026-10-28",
+  year: 2026,
+  month: 10,
+  sequence: 1,
+  capacity: 150
+};
+
 export default function HeroNextCohortStat({ onClick }: HeroNextCohortStatProps) {
-  const [targetCohort, setTargetCohort] = useState<Cohort | null>(null);
-
-  const fetchCohorts = async () => {
-    try {
-      const res = await fetch("/api/public/cohorts");
-      if (res.ok) {
-        const data: Cohort[] = await res.json();
-        if (data && data.length > 0) {
-          const now = new Date();
-          // Filter valid cohorts with start dates
-          const validCohorts = data
-            .filter(c => c.start_date && (c.status === "enrolling" || c.status === "draft" || c.status === "active"))
-            .map(c => ({
-              cohort: c,
-              startDate: new Date(c.start_date + "T00:00:00")
-            }))
-            .filter(item => !isNaN(item.startDate.getTime()))
-            .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
-
-          if (validCohorts.length > 0) {
-            // Pick closest upcoming or current cohort
-            setTargetCohort(validCohorts[0].cohort);
-          } else if (data.length > 0) {
-            setTargetCohort(data[0]);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch public cohorts for hero stat:", err);
-    }
-  };
+  const [targetCohort, setTargetCohort] = useState<Cohort>(DEFAULT_COHORT);
 
   useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const fetchCohorts = async () => {
+      try {
+        const res = await fetch("/api/public/cohorts", { signal: controller.signal });
+        if (!isMounted) return;
+        if (res.ok) {
+          const data: Cohort[] = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            const now = new Date();
+            // Filter valid cohorts with start dates
+            const validCohorts = data
+              .filter(c => c && c.start_date && (c.status === "enrolling" || c.status === "draft" || c.status === "active"))
+              .map(c => ({
+                cohort: c,
+                startDate: new Date(c.start_date + "T00:00:00")
+              }))
+              .filter(item => !isNaN(item.startDate.getTime()))
+              .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+            if (validCohorts.length > 0) {
+              // Pick closest upcoming or current cohort, or the latest cohort if all are past
+              const upcoming = validCohorts.filter(item => item.startDate.getTime() >= now.getTime());
+              if (upcoming.length > 0) {
+                setTargetCohort(upcoming[0].cohort);
+              } else {
+                setTargetCohort(validCohorts[validCohorts.length - 1].cohort);
+              }
+            } else if (data.length > 0) {
+              setTargetCohort(data[0]);
+            }
+          }
+        }
+      } catch {
+        // Silently preserve current fallback on network error/offline or during restart
+      }
+    };
+
     fetchCohorts();
-    // Poll every 5 seconds so when admin creates a cohort in Curriculum Calendar, it auto updates
-    const interval = setInterval(fetchCohorts, 5000);
-    return () => clearInterval(interval);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchCohorts();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", fetchCohorts);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchCohorts();
+      }
+    }, 20000);
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", fetchCohorts);
+    };
   }, []);
 
   const getDisplayContent = () => {
@@ -62,8 +106,6 @@ export default function HeroNextCohortStat({ onClick }: HeroNextCohortStatProps)
       };
     }
 
-    const monthNames = ["AUG", "SEP", "OCT", "NOV", "DEC", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL"];
-    // JS getMonth(): 0 = Jan, 1 = Feb ... 7 = Aug
     const allMonths = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
     const monthStr = allMonths[startDate.getMonth()];
     const dayStr = startDate.getDate();

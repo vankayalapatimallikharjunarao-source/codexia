@@ -51,11 +51,13 @@ export default function PayUCheckoutModal({
   const currencySymbol = sessionData.currency === "USD" ? "$" : "₹";
   const formattedAmount = `${currencySymbol}${sessionData.finalAmount.toLocaleString()}`;
 
-  const fallbackUrl = (sessionData.courseId === "premium") ? "https://u.payu.in/1rC2wPC1aNFT" : "https://u.payu.in/crJLw8TgDtWB";
+  const fallbackUrl = `/api/payu/checkout-direct?courseId=${sessionData.courseId || "standard"}&currency=${sessionData.currency || "INR"}`;
 
   const handleOpenGatewayTab = () => {
-    const payuUrl = sessionData.redirectUrl || fallbackUrl;
-    window.open(payuUrl, "_blank", "noopener,noreferrer");
+    const payuUrl = sessionData.redirectUrl && !sessionData.redirectUrl.includes("u.payu.in")
+      ? sessionData.redirectUrl
+      : fallbackUrl;
+    window.location.href = payuUrl;
   };
 
   const handleBookNowPayment = async (e: React.FormEvent) => {
@@ -68,35 +70,8 @@ export default function PayUCheckoutModal({
     setIsProcessing(true);
     setErrorMsg(null);
 
-    try {
-      const res = await fetch("/api/payu/verify-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          txnid: sessionData.txnid,
-          customer: {
-            phone,
-            email,
-            name: customerName || "Cohort Student"
-          }
-        }),
-      });
-
-      const data = await res.json();
-      if (data && data.verified) {
-        setVerifiedSuccess(true);
-        setTimeout(() => {
-          onPaymentVerified();
-        }, 1500);
-      } else {
-        setErrorMsg(data.error || "Payment failed on PayU Gateway. Please try again.");
-      }
-    } catch (err) {
-      console.error("PayU processing error:", err);
-      setErrorMsg("Connection error to PayU Gateway servers. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
+    const directUrl = `/api/payu/checkout-direct?courseId=${sessionData.courseId || "standard"}&currency=${sessionData.currency || "INR"}&phone=${encodeURIComponent(phone.trim())}&email=${encodeURIComponent(email.trim())}&name=${encodeURIComponent(customerName.trim() || "Student")}`;
+    window.location.href = directUrl;
   };
 
   return (
