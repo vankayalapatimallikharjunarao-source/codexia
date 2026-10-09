@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import crypto from "crypto";
@@ -150,8 +149,9 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Hardcoded to 3000 per infrastructure requirement
-const PORT = 3000;
+// Cloud Run injects PORT (8080) at runtime and requires the container to listen on it.
+// Falls back to 3000 for local development / AI Studio.
+const PORT = Number(process.env.PORT) || 3000;
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
@@ -3260,7 +3260,9 @@ app.get(["/api/legal-pages/:pageKey", "/api/legal/documents/:pageKey"], (req, re
     lastUpdatedSubtext: "Last updated: 25 July 2026",
     grievanceOfficer: GRIEVANCE_OFFICER_DETAILS
   });
-});function getSmartFallbackReply(message: string): string {
+});
+
+function getSmartFallbackReply(message: string): string {
   const query = message.toLowerCase();
   
   if (query.includes("curriculum") || query.includes("syllabus") || query.includes("learn") || query.includes("course") || query.includes("cohort") || query.includes("day") || query.includes("class")) {
@@ -3466,6 +3468,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Vite middleware for development vs static build for production
 async function setupVite() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -3480,8 +3483,13 @@ async function setupVite() {
   }
 }
 
-setupVite().then(() => {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+setupVite()
+  .then(() => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT} (NODE_ENV=${process.env.NODE_ENV || "development"})`);
+    });
+  })
+  .catch((err) => {
+    console.error("[FATAL] Server failed to start:", err);
+    process.exit(1);
   });
-});
