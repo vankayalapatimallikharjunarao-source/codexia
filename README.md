@@ -38,3 +38,9 @@ gcloud run services update SERVICE_NAME --region REGION \
 
 Then open `https://YOUR-SERVICE-URL/api/health` and confirm `"payu": { "configured": true, ... }`.
 `PAYU_ENV=production` needs live key/salt; use `PAYU_ENV=test` with PayU test credentials.
+
+### Pricing: portal and PayU always match
+The server is the single source of truth. `GET /api/pricing` returns the current price per course/currency, and the PayU
+routes (`/api/create-payu-payment`, `/api/payu/checkout-direct`, `/api/payu/checkout/:txnid`) charge the same number.
+While the promo is active (admin toggle on `/api/masterclass`, or until `PROMO_ENDS_AT`) the discounted price is charged;
+afterwards the original price is charged. The price is locked at the moment checkout starts.

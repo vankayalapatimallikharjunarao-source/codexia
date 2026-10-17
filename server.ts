@@ -171,6 +171,22 @@ let masterclassActive = true;
 let masterclassExpirationTime: number | null = Date.now() + 900 * 1000; // default 15 minutes from server start
 let masterclassDuration = 900;
 
+// Optional: PROMO_ENDS_AT (ISO date, e.g. 2026-11-30T23:59:59+05:30) pins the discount end time so every
+// Cloud Run instance / restart agrees on the same offer window instead of each starting its own timer.
+const promoEndsAtRaw = (process.env.PROMO_ENDS_AT || "").trim();
+if (promoEndsAtRaw) {
+  const promoEndsAt = Date.parse(promoEndsAtRaw);
+  if (Number.isNaN(promoEndsAt)) {
+    console.warn(`[PROMO] Ignoring invalid PROMO_ENDS_AT="${promoEndsAtRaw}"`);
+  } else if (promoEndsAt <= Date.now()) {
+    masterclassActive = false;
+    masterclassExpirationTime = null;
+  } else {
+    masterclassExpirationTime = promoEndsAt;
+    masterclassDuration = Math.max(1, Math.round((promoEndsAt - Date.now()) / 1000));
+  }
+}
+
 // Unified Centralized Server-side State Store (for persisting localStorage values in-memory)
 const defaultTestimonials: any[] = [];
 
@@ -2589,10 +2605,7 @@ app.post("/api/enquiries", (req, res) => {
 
 app.get("/api/masterclass", (req, res) => {
   const now = Date.now();
-  if (masterclassActive && masterclassExpirationTime && now >= masterclassExpirationTime) {
-    masterclassActive = false;
-    masterclassExpirationTime = null;
-  }
+  isDiscountActive(); // applies expiry so portal timer and gateway price never disagree
   
   const timeLeft = masterclassActive && masterclassExpirationTime
     ? Math.max(0, Math.round((masterclassExpirationTime - now) / 1000))
@@ -2773,6 +2786,47 @@ const SERVER_COURSE_CATALOG: Record<string, ServerCourseInfo> = {
   }
 };
 
+// ---------------------------------------------------------------------------------------
+// Live pricing: the payment gateway must charge exactly what the portal displays.
+// The portal shows the discounted price while the masterclass promo is active (countdown /
+// admin toggle) and the original price otherwise, so payments follow that same state.
+// ---------------------------------------------------------------------------------------
+function isDiscountActive(): boolean {
+  if (masterclassActive && masterclassExpirationTime && Date.now() >= masterclassExpirationTime) {
+    masterclassActive = false;
+    masterclassExpirationTime = null;
+  }
+  return masterclassActive;
+}
+
+function resolveCoursePrice(course: ServerCourseInfo, isUSD: boolean) {
+  const originalPrice = isUSD ? course.originalPriceUSD : course.originalPriceINR;
+  const offerPrice = isUSD ? course.offerPriceUSD : course.offerPriceINR;
+  const offerActive = course.isOfferActive && isDiscountActive() && offerPrice < originalPrice;
+  return {
+    originalPrice,
+    offerPrice,
+    offerActive,
+    finalAmount: offerActive ? offerPrice : originalPrice
+  };
+}
+
+// Public pricing snapshot so the portal and the gateway always read the same numbers
+app.get("/api/pricing", (req, res) => {
+  const discountActive = isDiscountActive();
+  const timeLeft = discountActive && masterclassExpirationTime
+    ? Math.max(0, Math.round((masterclassExpirationTime - Date.now()) / 1000))
+    : 0;
+  const courses = Object.values(SERVER_COURSE_CATALOG).map(course => ({
+    courseId: course.courseId,
+    name: course.name,
+    INR: resolveCoursePrice(course, false),
+    USD: resolveCoursePrice(course, true)
+  }));
+  res.set("Cache-Control", "no-store");
+  res.json({ discountActive, timeLeft, courses });
+});
+
 const pendingPayuOrders: Record<string, any> = {};
 
 // PayU Credentials & Environment Setup
@@ -2919,13 +2973,11 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
   const normalizedCourseId = (courseId || "standard").toLowerCase();
   const course = SERVER_COURSE_CATALOG[normalizedCourseId] || SERVER_COURSE_CATALOG["standard"];
 
-  const isUSD = currency === "USD";
-  const originalPrice = isUSD ? course.originalPriceUSD : course.originalPriceINR;
-  const offerPrice = isUSD ? course.offerPriceUSD : course.offerPriceINR;
+  const isUSD = String(currency || "").toUpperCase() === "USD";
 
-  // Authoritative offer active status (honor active launch offer: ₹3,999 Base / ₹9,999 Premium)
-  const isOfferValid = course.isOfferActive;
-  const finalAmount = isOfferValid ? offerPrice : originalPrice;
+  // Authoritative price follows the live portal discount (₹3,999 Base / ₹9,999 Premium while the offer is
+  // running, original ₹4,999 / ₹12,999 once it ends) - never a hardcoded value.
+  const { originalPrice, offerPrice, offerActive, finalAmount } = resolveCoursePrice(course, isUSD);
   const amountStr = finalAmount.toFixed(2);
 
   const txnid = `PAYU_${course.courseId.toUpperCase()}_${Date.now()}_${Math.floor(Math.random() * 8999 + 1000)}`;
@@ -2966,7 +3018,7 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     offerPrice,
     finalAmount,
     currency: isUSD ? "USD" : "INR",
-    isOfferActive: course.isOfferActive,
+    isOfferActive: offerActive,
     status: "created",
     redirectUrl: `/api/payu/checkout-direct?courseId=${course.courseId}&currency=${isUSD ? "USD" : "INR"}`,
     payuParams,
@@ -2981,7 +3033,7 @@ app.post(["/api/create-payu-payment", "/api/payu/create-payment"], (req, res) =>
     courseName: course.name,
     originalPrice,
     offerPrice,
-    offerActive: course.isOfferActive,
+    offerActive,
     finalAmount,
     amountStr,
     currency: isUSD ? "USD" : "INR",
@@ -3002,9 +3054,7 @@ app.get("/api/payu/checkout-direct", (req, res) => {
   const course = SERVER_COURSE_CATALOG[courseId] || SERVER_COURSE_CATALOG["standard"];
 
   const isUSD = currency === "USD";
-  const finalAmount = course.isOfferActive 
-    ? (isUSD ? course.offerPriceUSD : course.offerPriceINR)
-    : (isUSD ? course.originalPriceUSD : course.originalPriceINR);
+  const { finalAmount, offerActive } = resolveCoursePrice(course, isUSD);
   const amountStr = finalAmount.toFixed(2);
 
   const txnid = `PAYU_${course.courseId.toUpperCase()}_${Date.now()}_${Math.floor(Math.random() * 8999 + 1000)}`;
@@ -3040,7 +3090,7 @@ app.get("/api/payu/checkout-direct", (req, res) => {
     courseName: course.name,
     finalAmount,
     currency: isUSD ? "USD" : "INR",
-    isOfferActive: course.isOfferActive,
+    isOfferActive: offerActive,
     status: "created",
     payuParams,
     customer: { firstname, email, phone },
@@ -3070,9 +3120,7 @@ app.get("/api/payu/checkout/:txnid", (req, res) => {
     const courseId = isPremium ? "premium" : "standard";
     const course = SERVER_COURSE_CATALOG[courseId] || SERVER_COURSE_CATALOG["standard"];
     const isUSD = txnid.includes("_USD_");
-    const finalAmount = course.isOfferActive 
-      ? (isUSD ? course.offerPriceUSD : course.offerPriceINR)
-      : (isUSD ? course.originalPriceUSD : course.originalPriceINR);
+    const { finalAmount, offerActive } = resolveCoursePrice(course, isUSD);
     const amountStr = finalAmount.toFixed(2);
     const productinfo = course.name;
     const firstname = "Student";
@@ -3090,7 +3138,7 @@ app.get("/api/payu/checkout/:txnid", (req, res) => {
       courseName: course.name,
       finalAmount,
       currency: isUSD ? "USD" : "INR",
-      isOfferActive: course.isOfferActive,
+      isOfferActive: offerActive,
       status: "created",
       payuParams: {
         key: PAYU_KEY,
