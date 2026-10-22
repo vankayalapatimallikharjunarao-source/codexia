@@ -146,6 +146,59 @@ async function sendCertificateEmail(params: {
 
 
 const app = express();
+
+// Cloud Run sits behind Google's load balancer: trust X-Forwarded-* so req.ip is the real client.
+app.set("trust proxy", true);
+app.disable("x-powered-by");
+
+// ---------------------------------------------------------------------------------------
+// Safety-net rate limiter (per client IP, fixed 60s window) for /api/*.
+// A runaway client (tight polling loop, retry storm, bot) otherwise exhausts the Cloud Run
+// service and EVERY visitor then sees the platform's plain "Rate exceeded." page. Rejecting the
+// noisy client early with a proper 429 + Retry-After keeps the service healthy for everyone else.
+// Tune with API_RATE_LIMIT_PER_MIN (default 600, set 0 to disable).
+// ---------------------------------------------------------------------------------------
+const API_RATE_LIMIT_PER_MIN = (() => {
+  const n = Number.parseInt(process.env.API_RATE_LIMIT_PER_MIN || "600", 10);
+  return Number.isFinite(n) && n >= 0 ? n : 600;
+})();
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+const RATE_EXEMPT_PREFIXES = ["/api/health", "/api/payu/callback"]; // health probes + PayU server callbacks
+
+if (API_RATE_LIMIT_PER_MIN > 0) {
+  app.use("/api", (req, res, next) => {
+    const fullPath = req.originalUrl.split("?")[0];
+    if (RATE_EXEMPT_PREFIXES.some(prefix => fullPath.startsWith(prefix))) return next();
+
+    const now = Date.now();
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    let bucket = rateBuckets.get(ip);
+    if (!bucket || now >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + 60_000 };
+      rateBuckets.set(ip, bucket);
+    }
+    bucket.count += 1;
+
+    if (bucket.count > API_RATE_LIMIT_PER_MIN) {
+      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({
+        error: "Too many requests. Please slow down and try again shortly.",
+        retryAfterSeconds: retryAfter
+      });
+    }
+    next();
+  });
+
+  // Drop expired buckets so the map cannot grow without bound
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, bucket] of rateBuckets) {
+      if (now >= bucket.resetAt) rateBuckets.delete(ip);
+    }
+  }, 60_000).unref();
+}
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -2611,6 +2664,7 @@ app.get("/api/masterclass", (req, res) => {
     ? Math.max(0, Math.round((masterclassExpirationTime - now) / 1000))
     : masterclassDuration;
 
+  res.set("Cache-Control", "private, max-age=2");
   res.json({
     active: masterclassActive,
     timeLeft: timeLeft,
@@ -2823,7 +2877,7 @@ app.get("/api/pricing", (req, res) => {
     INR: resolveCoursePrice(course, false),
     USD: resolveCoursePrice(course, true)
   }));
-  res.set("Cache-Control", "no-store");
+  res.set("Cache-Control", "private, max-age=5");
   res.json({ discountActive, timeLeft, courses });
 });
 
@@ -3616,8 +3670,21 @@ async function setupVite() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Hashed build assets never change -> cache for a year (browsers stop re-requesting them).
+    // HTML must always revalidate so new deployments are picked up immediately.
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-cache");
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else {
+          res.setHeader("Cache-Control", "public, max-age=3600");
+        }
+      }
+    }));
     app.get('*', (req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -3625,9 +3692,23 @@ async function setupVite() {
 
 setupVite()
   .then(() => {
-    app.listen(PORT, "0.0.0.0", () => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT} (NODE_ENV=${process.env.NODE_ENV || "development"})`);
     });
+
+    // Google's load balancer keeps connections open for up to 600s; Node's 5s default closes them first
+    // and causes sporadic 502/503/429-style failures under load.
+    server.keepAliveTimeout = 650_000;
+    server.headersTimeout = 660_000;
+
+    // Cloud Run sends SIGTERM when scaling down / deploying: finish in-flight requests, then exit.
+    const shutdown = (signal: string) => {
+      console.log(`[SHUTDOWN] ${signal} received, draining connections...`);
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 9_000).unref(); // Cloud Run force-kills after 10s
+    };
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
   })
   .catch((err) => {
     console.error("[FATAL] Server failed to start:", err);
